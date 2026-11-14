@@ -113,6 +113,19 @@ describe('toChromeManifestVersion', () => {
     );
   });
 
+  it('maps beta releases into their own band under the preview range', () => {
+    const beta = toChromeManifestVersion('0.0.1-beta');
+    const beta2 = toChromeManifestVersion('0.0.1-beta.2');
+    const preview = toChromeManifestVersion('0.0.1-preview.0');
+    expect(beta).toBe('0.0.1.50000');
+    expect(beta2).toBe('0.0.1.50002');
+    expect(beta.localeCompare(beta2, undefined, { numeric: true })).toBe(-1);
+    expect(beta2.localeCompare(preview, undefined, { numeric: true })).toBe(-1);
+    expect(() => toChromeManifestVersion('0.0.1-beta.10000')).toThrow(
+      'Invalid extension package version',
+    );
+  });
+
   it('rejects out-of-range Chrome components and unsupported prereleases', () => {
     expect(() => toChromeManifestVersion('65536.0.0')).toThrow(
       'Invalid extension package version',

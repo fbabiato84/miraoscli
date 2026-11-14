@@ -16,6 +16,7 @@ const repoRoot = path.resolve(
 
 const CHROME_COMPONENT_MAX = 65535;
 const STABLE_BUILD = CHROME_COMPONENT_MAX;
+const BETA_BUILD_START = 50000;
 const PREVIEW_BUILD_START = 60000;
 const NIGHTLY_FALLBACK_EPOCH_DAYS = Math.floor(
   Date.UTC(2000, 0, 1) / 86_400_000,
@@ -127,6 +128,19 @@ export function toChromeManifestVersion(packageVersion, nightlyBuildNumber) {
         throw new Error(`Invalid extension package version: ${packageVersion}`);
       }
       build = PREVIEW_BUILD_START + value;
+    } else if (channel === 'beta') {
+      // `-beta` and `-beta.N` get their own band under the preview range. A
+      // nightly whose commit count passes BETA_BUILD_START would land inside
+      // it, so the two channels must not be compared for ordering.
+      const betaNumber = value ?? 0;
+      if (
+        !Number.isInteger(betaNumber) ||
+        betaNumber < 0 ||
+        BETA_BUILD_START + betaNumber >= PREVIEW_BUILD_START
+      ) {
+        throw new Error(`Invalid extension package version: ${packageVersion}`);
+      }
+      build = BETA_BUILD_START + betaNumber;
     } else if (
       channel === 'nightly' &&
       typeof value === 'number' &&
