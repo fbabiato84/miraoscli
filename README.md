@@ -26,6 +26,20 @@ bin/miraos.cmd --version
 bin/miraos.cmd --help
 ```
 
+## Bundled REA engine
+
+The [REA](https://github.com/morluto/rea) reverse-engineering engine (`rea-agents`, MIT) ships with the CLI: it registers itself as a top-tier MCP server named `rea`, so all 255 of its tools are available with no install step. Native binaries go through Ghidra, IDA or Hopper when one is installed; JavaScript/Electron, websites, .NET, Android, WASM and firmware work without a native decompiler.
+
+`vendor/rea/` is generated, never committed — `npm run build` fetches the pinned tarball plus its runtime dependencies through `scripts/build-rea.js`. The step never fails the build: without network or disk the CLI still installs and the server simply stays unregistered. To repair it:
+
+```bash
+npm run build:rea            # or, to re-fetch from scratch: npm run build:rea -- --force
+```
+
+Set `REA_MCP_ENTRY` to a REA checkout's `scripts/rea.mjs` to use one instead, and run `/mcp` inside the CLI to see the server and its tools.
+
+Only reverse-engineer targets you own or are explicitly authorised to inspect.
+
 ## What was rebranded (and what was kept)
 
 Rebranded in this source:
