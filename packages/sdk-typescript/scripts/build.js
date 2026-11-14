@@ -13,6 +13,7 @@ import {
   readFileSync,
   statSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import esbuild from 'esbuild';
@@ -45,20 +46,33 @@ execSync('tsc --build tsconfig.reference.json', {
 });
 
 try {
-  execSync(
-    'npx dts-bundle-generator --project tsconfig.build.json -o dist/index.d.ts src/index.ts',
-    {
-      stdio: 'inherit',
-      cwd: rootDir,
-    },
+  // The local binary, not `npx`: `npx <name>` resolves the spec as a path when
+  // a stray resolution root sits above the checkout, and on a clean machine it
+  // can reach the network for a package the lockfile already pins.
+  const dtsBundleGenerator = createRequire(import.meta.url).resolve(
+    'dts-bundle-generator/package.json',
   );
-  execSync(
-    'npx dts-bundle-generator --project tsconfig.build.json -o dist/daemon/transcript.d.ts src/daemon/transcript.ts',
-    {
-      stdio: 'inherit',
-      cwd: rootDir,
-    },
+  const dtsBundleGeneratorBin = join(
+    dirname(dtsBundleGenerator),
+    'dist',
+    'bin',
+    'dts-bundle-generator.js',
   );
+  const bundleDeclarations = (entry, out) =>
+    execFileSync(
+      process.execPath,
+      [
+        dtsBundleGeneratorBin,
+        '--project',
+        'tsconfig.build.json',
+        '-o',
+        out,
+        entry,
+      ],
+      { stdio: 'inherit', cwd: rootDir },
+    );
+  bundleDeclarations('src/index.ts', 'dist/index.d.ts');
+  bundleDeclarations('src/daemon/transcript.ts', 'dist/daemon/transcript.d.ts');
 
   const dirsToRemove = ['mcp', 'query', 'transport', 'types', 'utils'];
   for (const dir of dirsToRemove) {
