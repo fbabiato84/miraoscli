@@ -2231,77 +2231,6 @@ describe('Session', () => {
     );
   });
 
-  it.each([false, true])(
-    'preserves the selected subscription and catalog after logout (other provider: %s)',
-    async (hasProvider) => {
-      let auth: AuthType | undefined = AuthType.QWEN_SUBSCRIPTION;
-      vi.mocked(mockConfig.getAuthType).mockImplementation(() => auth);
-      const clearAuth = vi.fn(() => {
-        auth = undefined;
-      });
-      Object.assign(mockConfig, {
-        clearAuth,
-        setSubscriptionPlan: vi.fn(),
-        getCurrentModelRegistryBaseUrl: vi.fn(),
-      });
-      vi.mocked(mockConfig.getAllConfiguredModels).mockReturnValue(
-        hasProvider
-          ? [
-              {
-                id: 'bailian',
-                label: 'Bailian',
-                authType: AuthType.USE_OPENAI,
-                baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-              },
-            ]
-          : [],
-      );
-      vi.mocked(mockConfig.switchModel).mockImplementation(async (next) => {
-        auth = next;
-      });
-      vi.mocked(mockConfig.getModel).mockReturnValue('server-only-model');
-      const registry = new core.BackgroundTaskRegistry();
-      const controller = new AbortController();
-      const task = registry.register({
-        agentId: 'subscription-logout-agent',
-        description: 'Subscription background agent',
-        status: 'running',
-        startTime: Date.now(),
-        abortController: controller,
-        isBackgrounded: true,
-        outputFile: path.join(os.tmpdir(), `${randomUUID()}.jsonl`),
-      });
-      vi.mocked(mockConfig.getBackgroundTaskRegistry).mockReturnValue(registry);
-      vi.spyOn(session, 'sendAvailableCommandsUpdate').mockResolvedValue(
-        undefined,
-      );
-      await session.reloadModelProvidersFromDisk({
-        subscriptionSignedOut: true,
-      });
-      expect(controller.signal.aborted).toBe(true);
-      expect(task.status).toBe('cancelled');
-      expect(task.persistedCancellationStatus).toBe('cancelled');
-      expect(task.notified).toBe(true);
-      expect(clearAuth).not.toHaveBeenCalled();
-      expect(mockConfig.reloadModelProvidersConfig).not.toHaveBeenCalled();
-      expect(
-        mockSettings.reloadScopesFromDiskAtomically,
-      ).not.toHaveBeenCalled();
-      expect(mockConfig.switchModel).not.toHaveBeenCalled();
-      expect(auth).toBe(AuthType.QWEN_SUBSCRIPTION);
-      expect(mockSettings.setValue).not.toHaveBeenCalled();
-      expect(mockClient.extNotification).toHaveBeenCalledWith(
-        'qwen/notify/session/model-update',
-        {
-          v: 1,
-          sessionId: 'test-session-id',
-          currentModelId: expect.stringContaining('server-only-model'),
-          subscriptionSignedOut: true,
-        },
-      );
-    },
-  );
-
   it('does not apply stale model providers when a settings scope cannot reload', async () => {
     vi.mocked(mockSettings.reloadScopesFromDiskAtomically).mockReturnValueOnce(
       false,
@@ -14734,58 +14663,6 @@ describe('Session', () => {
         files.forEach((file, index) => {
           expect(file.settings.model).toStrictEqual(before[index]);
           expect(file.originalSettings.model).toStrictEqual(before[index]);
-        });
-      },
-    );
-
-    it.each([
-      ['standalone', AuthType.USE_OPENAI, 'qwen3-coder-flash', false],
-      ['standalone', AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-max', true],
-      [undefined, AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-max', true],
-    ] as const)(
-      'switches %s session to %s using only the session config',
-      async (sourceType, authType, modelId, refresh) => {
-        session.dispose();
-        vi.mocked(mockConfig.getSessionSourceType).mockReturnValue(sourceType);
-        const refreshSubscriptionModels = vi.fn().mockResolvedValue({
-          models: [modelId],
-          cached: false,
-        });
-        Object.assign(mockConfig, { refreshSubscriptionModels });
-        session = new Session(
-          'test-session-id',
-          mockConfig,
-          mockClient,
-          mockSettings,
-        );
-
-        await session.setModel(
-          {
-            sessionId: 'test-session-id',
-            modelId: `${modelId}(${authType})`,
-          },
-          { persistDefault: sourceType === 'standalone' },
-        );
-
-        expect(mockConfig.switchModel).toHaveBeenCalledWith(
-          authType,
-          modelId,
-          undefined,
-        );
-        expect(mockSettings.setValue).not.toHaveBeenCalled();
-        if (refresh) {
-          expect(refreshSubscriptionModels).toHaveBeenCalledOnce();
-          expect(refreshSubscriptionModels).toHaveBeenCalledBefore(
-            switchModelSpy,
-          );
-        } else {
-          expect(refreshSubscriptionModels).not.toHaveBeenCalled();
-        }
-        expect(
-          mockChatRecordingService.recordSessionModel,
-        ).toHaveBeenCalledWith({
-          modelId,
-          authType,
         });
       },
     );

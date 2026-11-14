@@ -14,11 +14,6 @@ import type { RequestLifecycleEvent } from '../telemetry/request-lifecycle.js';
 import { getInvocationContext } from '../utils/invocation-context.js';
 
 import { resolveProviderProtocol } from '../models/modelRegistry.js';
-import {
-  SUBSCRIPTION_MODELS_CACHED,
-  subscriptionModelUnavailable,
-} from '../qwen/subscription-models.js';
-import { QwenSubscriptionSession } from '../qwen/subscription-session.js';
 import { refreshModelCatalog } from '../models/model-catalog-refresh.js';
 import {
   captureReasoningSnapshot,
@@ -41,7 +36,8 @@ import type {
   ContentGenerator,
   ContentGeneratorConfig,
   InputModalities,
-} from '../core/contentGenerator.js';
+
+  AuthType} from '../core/contentGenerator.js';
 import type { ContentGeneratorConfigSources } from '../core/contentGenerator.js';
 import {
   setGeneratorReasoningEffort,
@@ -89,7 +85,6 @@ import {
   type WorkflowIntent,
 } from '../core/workflow-intent.js';
 import {
-  AuthType,
   createContentGenerator,
   resetPreloadedContentGenerator,
   resolveContentGeneratorConfigWithSources,
@@ -3003,8 +2998,6 @@ export class Config {
   private contentGeneratorConfig!: ContentGeneratorConfig;
   private contentGeneratorConfigSources: ContentGeneratorConfigSources = {};
   private contentGenerator?: ContentGenerator;
-  private subscriptionPlan?: 'plus' | 'pro';
-  private subscriptionModelIdentity?: string;
   private readonly initialAuthType?: AuthType;
   private initialResolvedAuthType?: AuthType;
   private readonly embeddingModel: string;
@@ -5960,14 +5953,6 @@ export class Config {
     return generator;
   }
 
-  getSubscriptionPlan(): 'plus' | 'pro' | undefined {
-    return this.subscriptionPlan;
-  }
-
-  setSubscriptionPlan(plan: 'plus' | 'pro' | undefined): void {
-    this.subscriptionPlan = plan;
-  }
-
   clearAuth(): void {
     this.backgroundTaskRegistry.abortAll({
       notify: false,
@@ -5980,8 +5965,6 @@ export class Config {
     this.contentGeneratorConfig = { model: '' };
     this.contentGeneratorConfigSources = {};
     this.initialResolvedAuthType = undefined;
-    this.subscriptionPlan = undefined;
-    this.subscriptionModelIdentity = undefined;
     this.modelsConfig.clearAuth();
     this.toolRegistry?.unregisterTool(ToolNames.WEB_SEARCH);
     this.notifyModelChangeListeners();
@@ -6053,7 +6036,6 @@ export class Config {
       );
       const configured = Object.entries(providers ?? {})
         .flatMap(([provider, entries]) =>
-          model.authType !== AuthType.QWEN_OAUTH &&
           resolveProviderProtocol(provider, protocols) === model.authType &&
           Array.isArray(entries)
             ? entries
@@ -6084,12 +6066,10 @@ export class Config {
     try {
       const next = captureReasoningSnapshot(models);
       for (const row of next) {
-        if (row.authType !== AuthType.QWEN_OAUTH || row.reasoning?.profile) {
-          validateReasoningCapabilities(
-            { model: row.id, authType: row.authType, baseUrl: row.baseUrl },
-            row.reasoning,
-          );
-        }
+        validateReasoningCapabilities(
+          { model: row.id, authType: row.authType, baseUrl: row.baseUrl },
+          row.reasoning,
+        );
       }
       const generation = this.getContentGeneratorConfig();
       if (generation)
@@ -6150,48 +6130,16 @@ export class Config {
     this.initialResolvedAuthType = undefined;
   }
 
-  async refreshSubscriptionModels(signal?: AbortSignal) {
-    const session = new QwenSubscriptionSession();
-    const identity = session.getIdentity();
-    this.subscriptionModelIdentity = undefined;
-    const result = await this.modelsConfig.refreshSubscriptionModels(
-      signal,
-      this.getCliVersion(),
-    );
-    if (identity && session.getIdentity() === identity) {
-      this.subscriptionModelIdentity = identity;
-    }
-    const previous = this.warnings.indexOf(SUBSCRIPTION_MODELS_CACHED);
-    if (previous !== -1) this.warnings.splice(previous, 1);
-    if (result.cached) this.warnings.push(SUBSCRIPTION_MODELS_CACHED);
-    this.notifyModelChangeListeners();
-    return result;
-  }
-
   /**
    * Refresh authentication and rebuild ContentGenerator.
    */
-  async refreshAuth(
-    authMethod: AuthType,
-    isInitialAuth?: boolean,
-    subscriptionFallbackModel?: string,
-    allowUnlistedSubscriptionModel?: boolean,
-  ) {
-    return this.rebuildContentGenerator(
-      authMethod,
-      isInitialAuth,
-      true,
-      subscriptionFallbackModel,
-      allowUnlistedSubscriptionModel,
-    );
+  async refreshAuth(authMethod: AuthType, isInitialAuth?: boolean) {
+    return this.rebuildContentGenerator(authMethod, isInitialAuth);
   }
 
   private async rebuildContentGenerator(
     authMethod: AuthType,
     isInitialAuth: boolean | undefined,
-    refreshSubscriptionModels: boolean,
-    subscriptionFallbackModel?: string,
-    allowUnlistedSubscriptionModel?: boolean,
   ) {
     const hookOwner = captureHookExecutionOwner(this, null);
     if (!this.contentGenerator && authMethod === this.initialAuthType) {
@@ -6217,40 +6165,8 @@ export class Config {
       ? priorReasoning.effort
       : undefined;
 
-    let fallbackModel: string | undefined;
-    if (authMethod === AuthType.QWEN_SUBSCRIPTION) {
-      const { models } = refreshSubscriptionModels
-        ? await this.refreshSubscriptionModels()
-        : {
-            models: this.modelsConfig
-              .getAvailableModelsForAuthType(authMethod)
-              .map((model) => model.id),
-          };
-      const selected = this.modelsConfig.getModel();
-      if (selected && !models.includes(selected)) {
-        if (
-          isInitialAuth &&
-          subscriptionFallbackModel &&
-          models.includes(subscriptionFallbackModel)
-        ) {
-          fallbackModel = subscriptionFallbackModel;
-        } else if (
-          !isInitialAuth ||
-          !allowUnlistedSubscriptionModel ||
-          priorGeneration.authType !== authMethod
-        ) {
-          throw new Error(subscriptionModelUnavailable(selected));
-        }
-      }
-    }
-
-    // The CLI's resolved subscription credentials preserve an unlisted model during sync.
-    const modelId = fallbackModel ?? this.modelsConfig.getModel();
+    const modelId = this.modelsConfig.getModel();
     this.modelsConfig.syncAfterAuthRefresh(authMethod, modelId);
-
-    // Check and consume cached credentials flag
-    const requireCached =
-      this.modelsConfig.consumeRequireCachedCredentialsFlag();
 
     const { config, sources } = resolveContentGeneratorConfigWithSources(
       this,
@@ -6296,7 +6212,7 @@ export class Config {
     this.contentGenerator = await createContentGenerator(
       newContentGeneratorConfig,
       this,
-      requireCached ? true : isInitialAuth,
+      isInitialAuth,
     );
     // Only assign to instance properties after successful initialization
     this.contentGeneratorConfig = newContentGeneratorConfig;
@@ -7826,125 +7742,24 @@ export class Config {
    */
   private async handleModelChange(
     authType: AuthType,
-    requiresRefresh: boolean,
+    _requiresRefresh: boolean,
     initializeIfNeeded?: boolean,
   ): Promise<void> {
     this.initialResolvedAuthType = undefined;
     if (!this.contentGeneratorConfig) {
-      if (initializeIfNeeded || authType === AuthType.QWEN_SUBSCRIPTION)
-        await this.refreshAuth(authType);
+      if (initializeIfNeeded) await this.refreshAuth(authType);
       return;
     }
 
     // Reasoning effort is a global, model-independent preference (set via
     // /effort). Capture it before the rebuild and re-apply after, so switching
-    // models never silently drops the user's chosen effort — neither the
-    // hot-update path (which copies a fixed field set, not `reasoning`) nor the
-    // full refresh path (which rebuilds the config from scratch).
+    // models never silently drops the user's chosen effort: the refresh path
+    // rebuilds the config from scratch.
     const priorReasoningEffort = this.getReasoningEffort();
 
     // Keep full history (including thought parts) on model switch.
     // Some OpenAI-compatible reasoning models (e.g. DeepSeek) require
     // reasoning_content to be preserved across turns.
-
-    // Hot update path: only supported for qwen-oauth.
-    // For other auth types we always refresh to recreate the ContentGenerator.
-    //
-    // Rationale:
-    // - Non-qwen providers may need to re-validate credentials / baseUrl / envKey.
-    // - ModelsConfig.applyResolvedModelDefaults can clear or change credentials sources.
-    // - Refresh keeps runtime behavior consistent and centralized.
-    if (authType === AuthType.QWEN_OAUTH && !requiresRefresh) {
-      const { config, sources } = resolveContentGeneratorConfigWithSources(
-        this,
-        authType,
-        this.modelsConfig.getGenerationConfig(),
-        this.modelsConfig.getGenerationConfigSources(),
-        {
-          strictModelProvider:
-            this.modelsConfig.isStrictModelProviderSelection(),
-        },
-      );
-
-      // Hot-update fields (qwen-oauth models share the same auth + client).
-      // Deliberately does NOT copy `reasoning`: it is a global, model-independent
-      // preference captured in `priorReasoningEffort` above and re-applied via
-      // setReasoningEffort() below. Do not add `reasoning` here — that would
-      // overwrite the live tier with the new model's default and make the
-      // restore a no-op.
-      this.contentGeneratorConfig.reasoningRouteBaseUrl =
-        config.reasoningRouteBaseUrl;
-      this.contentGeneratorConfig.model = config.model;
-      this.contentGeneratorConfig.samplingParams = config.samplingParams;
-      this.contentGeneratorConfig.contextWindowSize = config.contextWindowSize;
-      this.contentGeneratorConfig.enableCacheControl =
-        config.enableCacheControl;
-      // Read by the DashScope metadata gate off this same object, so a
-      // per-model override has to travel with the switch like the cache flags.
-      this.contentGeneratorConfig.enableRequestMetadata =
-        config.enableRequestMetadata;
-      this.contentGeneratorConfig.forceGlobalCacheScope =
-        config.forceGlobalCacheScope;
-      this.contentGeneratorConfig.cacheRetention = config.cacheRetention;
-      this.contentGeneratorConfig.cacheRetentionByBlock =
-        config.cacheRetentionByBlock;
-      this.contentGeneratorConfig.splitToolMedia = config.splitToolMedia;
-      this.contentGeneratorConfig.toolResultContentFormat =
-        config.toolResultContentFormat;
-      // Modalities are model-derived: a hot switch between oauth models with
-      // different image support must update them, or the vision-bridge gate and
-      // image-stripping read the previous model's modalities.
-      this.contentGeneratorConfig.modalities = config.modalities;
-
-      if ('model' in sources) {
-        this.contentGeneratorConfigSources['model'] = sources['model'];
-      }
-      if ('modalities' in sources) {
-        this.contentGeneratorConfigSources['modalities'] =
-          sources['modalities'];
-      }
-      if ('samplingParams' in sources) {
-        this.contentGeneratorConfigSources['samplingParams'] =
-          sources['samplingParams'];
-      }
-      if ('enableCacheControl' in sources) {
-        this.contentGeneratorConfigSources['enableCacheControl'] =
-          sources['enableCacheControl'];
-      }
-      if ('enableRequestMetadata' in sources) {
-        this.contentGeneratorConfigSources['enableRequestMetadata'] =
-          sources['enableRequestMetadata'];
-      }
-      if ('forceGlobalCacheScope' in sources) {
-        this.contentGeneratorConfigSources['forceGlobalCacheScope'] =
-          sources['forceGlobalCacheScope'];
-      }
-      if ('cacheRetention' in sources) {
-        this.contentGeneratorConfigSources['cacheRetention'] =
-          sources['cacheRetention'];
-      }
-      if ('cacheRetentionByBlock' in sources) {
-        this.contentGeneratorConfigSources['cacheRetentionByBlock'] =
-          sources['cacheRetentionByBlock'];
-      }
-      if ('contextWindowSize' in sources) {
-        this.contentGeneratorConfigSources['contextWindowSize'] =
-          sources['contextWindowSize'];
-      }
-      if ('splitToolMedia' in sources) {
-        this.contentGeneratorConfigSources['splitToolMedia'] =
-          sources['splitToolMedia'];
-      }
-      if ('toolResultContentFormat' in sources) {
-        this.contentGeneratorConfigSources['toolResultContentFormat'] =
-          sources['toolResultContentFormat'];
-      }
-      if (priorReasoningEffort) {
-        this.setReasoningEffort(priorReasoningEffort);
-      }
-      resetPreloadedContentGenerator(this.contentGenerator);
-      return;
-    }
 
     // Full refresh path. `refreshAuth` re-applies the reasoning effort it
     // captures, but on a model *switch* that capture is already stale: the
@@ -7955,17 +7770,7 @@ export class Config {
     // we captured off the still-intact live contentGeneratorConfig above. This is
     // a no-op when the new model disables thinking (`reasoning: false`), since
     // setReasoningEffort() skips that case and never silently re-enables it.
-    const reuseSubscriptionModels =
-      authType === AuthType.QWEN_SUBSCRIPTION &&
-      this.contentGeneratorConfig.authType === authType &&
-      this.subscriptionModelIdentity !== undefined &&
-      new QwenSubscriptionSession().getIdentity() ===
-        this.subscriptionModelIdentity;
-    if (reuseSubscriptionModels) {
-      await this.rebuildContentGenerator(authType, undefined, false);
-    } else {
-      await this.refreshAuth(authType);
-    }
+    await this.refreshAuth(authType);
     if (priorReasoningEffort) {
       this.setReasoningEffort(priorReasoningEffort);
     }
@@ -8022,11 +7827,10 @@ export class Config {
    *
    * For runtime models, the modelId should be in format `$runtime|${authType}|${modelId}`.
    * This triggers a refresh of the ContentGenerator when required (always on authType changes).
-   * For qwen-oauth model switches that are hot-update safe, this may update in place.
    *
    * @param authType - Target authentication type
    * @param modelId - Target model ID (or `$runtime|${authType}|${modelId}` for runtime models)
-   * @param options - Additional options like requireCachedCredentials
+   * @param options - Additional switch options (baseUrl, initializeIfNeeded)
    */
   async switchModel(
     authType: AuthType,

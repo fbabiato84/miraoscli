@@ -70,7 +70,6 @@ import { AppEvent } from '../../utils/events.js';
 import { t } from '../../i18n/index.js';
 import { refreshExtensionContentRuntime } from '../../config/extension-runtime-reload.js';
 import { isPickerOnlyModelInvocation } from '../commands/modelCommand.js';
-import { filterSubscriptionCommands } from '../commands/subscription-commands.js';
 import {
   appendUserPromptExpansionAdditionalContext,
   formatUserPromptExpansionBlockedMessage,
@@ -399,10 +398,7 @@ export class OpenTuiSlashDispatcher {
   }
 
   private get availableCommands(): readonly SlashCommand[] {
-    return filterSubscriptionCommands(
-      this.commandList,
-      this.services.config?.getAuthType?.(),
-    );
+    return this.commandList;
   }
 
   /** Parity of the processor's `reloadCommands` result swap. */

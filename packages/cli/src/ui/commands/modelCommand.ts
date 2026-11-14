@@ -13,16 +13,9 @@ import type {
 } from './types.js';
 import { CommandKind } from './types.js';
 import { t } from '../../i18n/index.js';
-import {
-  SUBSCRIPTION_MODELS_CACHED,
-  SUBSCRIPTION_MODELS_UNAVAILABLE,
-} from '@qwen-code/qwen-code-core/qwen/subscription-models.js';
-import { SubscriptionOAuthError } from '@qwen-code/qwen-code-core/qwen/subscription-oauth-client.js';
-import { subscriptionErrorMessage } from '@qwen-code/qwen-code-core/qwen/subscription-errors.js';
-import { MessageType } from '../types.js';
 import { getPersistScopeForModelSelection } from '../../config/modelProvidersScope.js';
 import {
-  AuthType,
+  type AuthType,
   type AvailableModel,
   type Config,
   isImageCapable,
@@ -178,17 +171,7 @@ async function switchMainModel(
   persistSelection = true,
 ): Promise<string> {
   if (parsed.authType) {
-    await switchPrimaryModel(
-      config,
-      settings,
-      parsed.authType,
-      parsed.modelId,
-      parsed.authType === AuthType.QWEN_OAUTH &&
-        (parsed.authType !== currentAuthType ||
-          !config.getContentGeneratorConfig()?.authType)
-        ? { requireCachedCredentials: true }
-        : undefined,
-    );
+    await switchPrimaryModel(config, settings, parsed.authType, parsed.modelId);
     if (persistSelection) {
       persistSetting(
         settings,
@@ -1121,12 +1104,7 @@ export const modelCommand: SlashCommand = {
       firstSpace === -1 ? '' : trimmedArgs.slice(firstSpace + 1).trim();
     const parsed = parseAcpModelOption(modelName);
     const contentGeneratorConfig = config.getContentGeneratorConfig();
-    const authType =
-      contentGeneratorConfig?.authType ??
-      (settings.merged.security?.auth?.selectedType ===
-      AuthType.QWEN_SUBSCRIPTION
-        ? AuthType.QWEN_SUBSCRIPTION
-        : parsed.authType);
+    const authType = contentGeneratorConfig?.authType ?? parsed.authType;
     if (!authType && !trimmedArgs && context.executionMode === 'interactive') {
       return {
         type: 'dialog',
@@ -1140,36 +1118,7 @@ export const modelCommand: SlashCommand = {
     if (policyError) {
       return { type: 'message', messageType: 'error', content: policyError };
     }
-    if (modelName && requestedAuthType === AuthType.QWEN_SUBSCRIPTION) {
-      context.ui.addItem(
-        { type: MessageType.INFO, text: t('Loading models from provider…') },
-        Date.now(),
-      );
-      try {
-        const result = await config.refreshSubscriptionModels(
-          context.abortSignal,
-        );
-        if (result.cached)
-          context.ui.addItem(
-            { type: MessageType.WARNING, text: SUBSCRIPTION_MODELS_CACHED },
-            Date.now(),
-          );
-      } catch (error) {
-        return {
-          type: 'message',
-          messageType: 'error',
-          content:
-            error instanceof SubscriptionOAuthError
-              ? subscriptionErrorMessage(error)
-              : SUBSCRIPTION_MODELS_UNAVAILABLE,
-        };
-      }
-    }
-    if (
-      !contentGeneratorConfig &&
-      authType !== AuthType.QWEN_SUBSCRIPTION &&
-      !parsed.authType
-    ) {
+    if (!contentGeneratorConfig && !parsed.authType) {
       return {
         type: 'message',
         messageType: 'error',

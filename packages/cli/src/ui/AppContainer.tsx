@@ -1868,18 +1868,12 @@ export const AppContainer = (props: AppContainerProps) => {
     config,
     historyManager.addItem,
     handleAuthChange,
-    initializationResult.skipStartupAuthDialog,
   );
   const { state: authState, actions: authActions } = auth;
   const { onAuthError, openAuthDialog, closeAuthDialog } = authActions;
   const { isAuthDialogOpen, isAuthenticating, pendingAuthType } = authState;
 
-  useInitializationAuthError(
-    initializationResult.skipStartupAuthDialog
-      ? null
-      : initializationResult.authError,
-    onAuthError,
-  );
+  useInitializationAuthError(initializationResult.authError, onAuthError);
 
   // Sync user tier from config when authentication changes
   // TODO: Implement getUserTier() method on Config if needed

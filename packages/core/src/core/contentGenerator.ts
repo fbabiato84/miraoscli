@@ -19,19 +19,14 @@ import type {
 import {
   getDefaultApiKeyEnvVar,
   getDefaultModelEnvVar,
-  MissingAnthropicBaseUrlEnvError,
   MissingApiKeyError,
-  MissingBaseUrlError,
   MissingModelError,
   StrictMissingCredentialsError,
   StrictMissingModelIdError,
 } from '../models/modelConfigErrors.js';
 import { PROVIDER_SOURCED_FIELDS } from '../models/constants.js';
 import { preloadRuntimeFetchModule } from '../utils/runtimeFetchOptions.js';
-import {
-  getModuleNotFoundError,
-  wrapLazyModuleLoadError,
-} from '../utils/errors.js';
+import { wrapLazyModuleLoadError } from '../utils/errors.js';
 import type { ReasoningEffort } from './reasoning-effort.js';
 
 /**
@@ -319,40 +314,6 @@ export interface ModelConfigValidationResult {
   errors: Error[];
 }
 
-export const VERTEX_PROJECT_ENV_VAR = 'GOOGLE_CLOUD_PROJECT';
-
-/**
- * Single definition of "a Vertex project is configured", shared by every gate
- * that decides whether Application Default Credentials are usable. Callers that
- * read from somewhere other than the process environment pass their own lookup
- * so all gates agree on whitespace handling.
- */
-export function hasVertexProjectConfigured(
-  lookup: (key: string) => string | undefined = (key) => process.env[key],
-): boolean {
-  return !!lookup(VERTEX_PROJECT_ENV_VAR)?.trim();
-}
-
-/**
- * Vertex AI accepts Application Default Credentials in place of an API key:
- * with a project configured and no key passed, the @google/genai client
- * resolves ADC itself. Passing any key value instead switches the client to
- * Vertex Express mode and disables ADC, so the key must stay absent.
- *
- * An entry that declares its own key variable is excluded: falling back to ADC
- * there would authenticate as a different principal than the one configured,
- * silently, whenever that variable failed to be injected.
- */
-function usesVertexApplicationDefaultCredentials(
-  config: ContentGeneratorConfig,
-): boolean {
-  return (
-    config.authType === AuthType.USE_VERTEX_AI &&
-    !config.apiKeyEnvKey &&
-    hasVertexProjectConfigured()
-  );
-}
-
 /**
  * Validate a resolved model configuration.
  * This is the single validation entry point used across Core.
@@ -363,16 +324,7 @@ export function validateModelConfig(
 ): ModelConfigValidationResult {
   const errors: Error[] = [];
 
-  // Qwen OAuth doesn't need validation - it uses dynamic tokens
-  if (
-    config.authType === AuthType.QWEN_OAUTH ||
-    config.authType === AuthType.QWEN_SUBSCRIPTION
-  ) {
-    return { valid: true, errors: [] };
-  }
-
-  // API key is required for all other auth types
-  if (!config.apiKey && !usesVertexApplicationDefaultCredentials(config)) {
+  if (!config.apiKey) {
     if (isStrictModelProvider) {
       errors.push(
         new StrictMissingCredentialsError(
@@ -403,20 +355,6 @@ export function validateModelConfig(
     } else {
       const envKey = getDefaultModelEnvVar(config.authType);
       errors.push(new MissingModelError({ authType: config.authType, envKey }));
-    }
-  }
-
-  // Explicit baseUrl is required for Anthropic; Migrated from existing code.
-  if (config.authType === AuthType.USE_ANTHROPIC && !config.baseUrl) {
-    if (isStrictModelProvider) {
-      errors.push(
-        new MissingBaseUrlError({
-          authType: config.authType,
-          model: config.model,
-        }),
-      );
-    } else if (config.authType === AuthType.USE_ANTHROPIC) {
-      errors.push(new MissingAnthropicBaseUrlEnvError());
     }
   }
 
@@ -516,7 +454,7 @@ export function resetPreloadedContentGenerator(
 export async function createContentGenerator(
   generatorConfig: ContentGeneratorConfig,
   config: Config,
-  isInitialAuth?: boolean,
+  _isInitialAuth?: boolean,
 ): Promise<ContentGenerator> {
   const validation = validateModelConfig(generatorConfig, false);
   if (!validation.valid) {
@@ -549,52 +487,6 @@ export async function createContentGenerator(
           './openaiResponsesContentGenerator/index.js'
         );
         return createOpenAIResponsesContentGenerator(generatorConfig, config);
-      };
-    } else if (authType === AuthType.QWEN_SUBSCRIPTION) {
-      loadBaseGenerator = async () => {
-        const { createSubscriptionContentGenerator } = await import(
-          '../qwen/subscription-content-generator.js'
-        );
-        return createSubscriptionContentGenerator(generatorConfig, config);
-      };
-    } else if (authType === AuthType.QWEN_OAUTH) {
-      const { getQwenOAuthClient: getQwenOauthClient } = await import(
-        '../qwen/qwenOAuth2.js'
-      );
-
-      try {
-        const qwenClient = await getQwenOauthClient(
-          config,
-          isInitialAuth ? { requireCachedCredentials: true } : undefined,
-        );
-        loadBaseGenerator = async () => {
-          const { QwenContentGenerator } = await import(
-            '../qwen/qwenContentGenerator.js'
-          );
-          return new QwenContentGenerator(qwenClient, generatorConfig, config);
-        };
-      } catch (error) {
-        if (getModuleNotFoundError(error)) {
-          throw error;
-        }
-        throw new Error(error instanceof Error ? error.message : String(error));
-      }
-    } else if (authType === AuthType.USE_ANTHROPIC) {
-      loadBaseGenerator = async () => {
-        const { createAnthropicContentGenerator } = await import(
-          './anthropicContentGenerator/index.js'
-        );
-        return createAnthropicContentGenerator(generatorConfig, config);
-      };
-    } else if (
-      authType === AuthType.USE_GEMINI ||
-      authType === AuthType.USE_VERTEX_AI
-    ) {
-      loadBaseGenerator = async () => {
-        const { createLlmContentGenerator } = await import(
-          './llm-content-generator/index.js'
-        );
-        return createLlmContentGenerator(generatorConfig, config);
       };
     } else {
       throw new Error(

@@ -11,7 +11,6 @@ import {
   type Config,
 } from '@qwen-code/qwen-code-core';
 import { z } from 'zod';
-import { sortModelEntriesForDisplay } from './model-display-order.js';
 
 export const ACP_ROUTE_ID_PREFIX = 'qwen-route:v1:';
 
@@ -134,7 +133,7 @@ export function buildAcpModelOptions(
               .slice(0, 16)}`,
     };
   });
-  return sortModelEntriesForDisplay(rows);
+  return rows;
 }
 
 export function resolveAcpModelOption(

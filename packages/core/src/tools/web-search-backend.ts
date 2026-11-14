@@ -34,9 +34,7 @@ export interface DashScopeWebSearchBackendConfig {
   customHeaders?: Record<string, string>;
 }
 
-export type WebSearchBackendConfig =
-  | DashScopeWebSearchBackendConfig
-  | { kind: 'qwen-subscription'; timeoutMs: number };
+export type WebSearchBackendConfig = DashScopeWebSearchBackendConfig;
 
 /** One page the search produced. */
 export interface WebSearchSource {

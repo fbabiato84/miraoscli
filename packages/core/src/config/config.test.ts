@@ -76,8 +76,7 @@ import {
   resetPreloadedContentGenerator,
   resolveContentGeneratorConfigWithSources,
 } from '../core/contentGenerator.js';
-import { DEFAULT_TOKEN_LIMIT, tokenLimit } from '../core/tokenLimits.js';
-import { buildAgentContentGeneratorConfig } from '../models/content-generator-config.js';
+import { DEFAULT_TOKEN_LIMIT } from '../core/tokenLimits.js';
 import { LlmClient } from '../core/client.js';
 import { runWithAgentContext } from '../agents/runtime/agent-context.js';
 import { buildSessionAgentToolConfig } from '../agents/workspace-agents/capability.js';
@@ -126,8 +125,6 @@ import { syncTeamMemory } from '../memory/team-memory-sync.js';
 import { getTeamMemoryShareabilityWarning } from '../memory/team-memory-git-status.js';
 import * as runtimeStatus from '../utils/runtimeStatus.js';
 import * as sessionRegistry from '../services/session-registry.js';
-import { QwenSubscriptionSession } from '../qwen/subscription-session.js';
-import { resolveModelConfig } from '../models/modelConfigResolver.js';
 
 /**
  * A settled registration for the shared record, the shape
@@ -1184,282 +1181,6 @@ describe('Server Config (config.ts)', () => {
     );
   });
 
-  describe('subscription model switching', () => {
-    beforeEach(() => {
-      vi.spyOn(
-        QwenSubscriptionSession.prototype,
-        'getIdentity',
-      ).mockReturnValue('account-a');
-      vi.spyOn(
-        QwenSubscriptionSession.prototype,
-        'getModels',
-      ).mockResolvedValue({
-        models: ['qwen3.8-max', 'qwen3.8-flash'],
-        cached: false,
-      });
-      stubContentGenerator();
-    });
-
-    afterEach(() => {
-      vi.mocked(QwenSubscriptionSession.prototype.getIdentity).mockRestore();
-      vi.mocked(QwenSubscriptionSession.prototype.getModels).mockRestore();
-    });
-
-    const subscriptionConfig = async () => {
-      const config = makeConfig({
-        cliVersion: '0.0.0-test',
-        model: 'qwen3.8-max',
-        generationConfig: { reasoning: { effort: 'high' } },
-        modelProvidersConfig: { openai: [{ id: 'other-model' }] },
-      });
-      await config.refreshAuth(AuthType.QWEN_SUBSCRIPTION);
-      return config;
-    };
-
-    it.each([
-      ['old-project-model', 'qwen3.8-flash', 'qwen3.8-flash'],
-      ['qwen3.8-max', 'qwen3.8-flash', 'qwen3.8-max'],
-      ['old-project-model', 'removed-user-model', undefined],
-    ])(
-      'resolves startup model %s with saved user fallback %s',
-      async (projectModel, fallback, expectedModel) => {
-        const config = makeConfig({
-          authType: AuthType.QWEN_SUBSCRIPTION,
-          model: projectModel,
-        });
-        const refresh = config.refreshAuth(
-          AuthType.QWEN_SUBSCRIPTION,
-          true,
-          fallback,
-        );
-        if (expectedModel) {
-          await refresh;
-          expect(config.getContentGeneratorConfig()?.model).toBe(expectedModel);
-          expect(config.getWarnings()).toEqual([]);
-        } else {
-          await expect(refresh).rejects.toThrow(
-            `The selected model, ${projectModel}, is no longer available. Run /model to choose another model.`,
-          );
-          expect(config.getModel()).toBe(projectModel);
-        }
-        expect(
-          QwenSubscriptionSession.prototype.getModels,
-        ).toHaveBeenCalledTimes(1);
-      },
-    );
-
-    it.each([
-      { fallback: undefined, expected: 'qwen4' },
-      { fallback: 'removed-user-model', expected: 'qwen4' },
-      { fallback: 'qwen3.8-flash', expected: 'qwen3.8-flash' },
-    ])(
-      'initializes subscription model $expected with startup fallback $fallback',
-      async ({ fallback, expected }) => {
-        const { config: generationConfig, sources } = resolveModelConfig({
-          authType: AuthType.QWEN_SUBSCRIPTION,
-          settings: { model: 'qwen4' },
-          env: {},
-        });
-        const config = makeConfig({
-          authType: AuthType.QWEN_SUBSCRIPTION,
-          model: 'qwen4',
-          generationConfig,
-          generationConfigSources: sources,
-        });
-
-        await config.refreshAuth(
-          AuthType.QWEN_SUBSCRIPTION,
-          true,
-          fallback,
-          true,
-        );
-
-        expect(config.getContentGeneratorConfig()).toMatchObject({
-          authType: AuthType.QWEN_SUBSCRIPTION,
-          model: expected,
-        });
-        expect(
-          config
-            .getAvailableModelsForAuthType(AuthType.QWEN_SUBSCRIPTION)
-            .map(({ id }) => id),
-        ).toEqual(['qwen3.8-max', 'qwen3.8-flash']);
-        expect(config.getWarnings()).toEqual([]);
-      },
-    );
-
-    it('initializes an API model when switching from a signed-out subscription', async () => {
-      const config = makeConfig({
-        authType: AuthType.QWEN_SUBSCRIPTION,
-        model: 'qwen3.8-max',
-        modelProvidersConfig: {
-          openai: [
-            {
-              id: 'api-model',
-              generationConfig: { contextWindowSize: 64000 },
-            },
-          ],
-        },
-      });
-      expect(
-        config.getContentGenerator({ allowUninitialized: true }),
-      ).toBeUndefined();
-
-      await config.switchModel(AuthType.USE_OPENAI, 'api-model', {
-        initializeIfNeeded: true,
-      });
-      expect(
-        config.getContentGenerator({ allowUninitialized: true }),
-      ).toBeDefined();
-      expect(config.getContentGeneratorConfig()).toMatchObject({
-        authType: AuthType.USE_OPENAI,
-        model: 'api-model',
-        contextWindowSize: 64000,
-      });
-    });
-
-    it('reuses the same account catalog while rebuilding model capabilities and reasoning', async () => {
-      vi.mocked(
-        QwenSubscriptionSession.prototype.getModels,
-      ).mockResolvedValueOnce({
-        models: ['qwen3.8-max', 'qwen3.8-flash'],
-        modelMetadata: [
-          { id: 'qwen3.8-flash', modalities: {}, contextWindowSize: 262144 },
-        ],
-        cached: false,
-      });
-      const config = await subscriptionConfig();
-      await config.switchModel(AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-flash');
-      expect(
-        config.getAvailableModelsForAuthType(AuthType.QWEN_SUBSCRIPTION),
-      ).toContainEqual(
-        expect.objectContaining({
-          id: 'qwen3.8-flash',
-          modalities: {},
-          contextWindowSize: 262144,
-        }),
-      );
-      expect(config.getContentGeneratorConfig()).toMatchObject({
-        model: 'qwen3.8-flash',
-        contextWindowSize: 262144,
-        reasoning: { effort: 'high' },
-      });
-      expect(config.getContentGeneratorConfig()?.modalities).toEqual({});
-      expect(
-        buildAgentContentGeneratorConfig(config, 'qwen3.8-max', {
-          authType: AuthType.QWEN_SUBSCRIPTION,
-        }).contextWindowSize,
-      ).toBe(tokenLimit('qwen3.8-max'));
-      await config.switchModel(AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-flash');
-      await config.switchModel(AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-max');
-
-      expect(QwenSubscriptionSession.prototype.getModels).toHaveBeenCalledTimes(
-        1,
-      );
-      expect(QwenSubscriptionSession.prototype.getModels).toHaveBeenCalledWith(
-        undefined,
-        '0.0.0-test',
-      );
-      expect(createContentGenerator).toHaveBeenCalledTimes(4);
-      expect(config.getContentGeneratorConfig()).toMatchObject({
-        authType: AuthType.QWEN_SUBSCRIPTION,
-        model: 'qwen3.8-max',
-        modalities: { image: true, video: true },
-        contextWindowSize: config
-          .getAvailableModelsForAuthType(AuthType.QWEN_SUBSCRIPTION)
-          .find((model) => model.id === 'qwen3.8-max')?.contextWindowSize,
-        reasoning: { effort: 'high' },
-      });
-    });
-
-    it('reloads the catalog after the login identity changes', async () => {
-      const config = await subscriptionConfig();
-      vi.mocked(QwenSubscriptionSession.prototype.getIdentity).mockReturnValue(
-        'account-b',
-      );
-      await config.switchModel(AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-flash');
-      expect(QwenSubscriptionSession.prototype.getModels).toHaveBeenCalledTimes(
-        2,
-      );
-    });
-
-    it('refuses a model unavailable to the replacement account', async () => {
-      const config = await subscriptionConfig();
-      vi.mocked(QwenSubscriptionSession.prototype.getIdentity).mockReturnValue(
-        'account-b',
-      );
-      vi.mocked(QwenSubscriptionSession.prototype.getModels).mockResolvedValue({
-        models: ['qwen3.8-max'],
-        cached: false,
-      });
-      await expect(
-        config.switchModel(AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-flash'),
-      ).rejects.toThrow('no longer available');
-      expect(QwenSubscriptionSession.prototype.getModels).toHaveBeenCalledTimes(
-        2,
-      );
-      expect(config.getModel()).toBe('qwen3.8-max');
-    });
-
-    it('does not reuse the catalog after logout', async () => {
-      const config = await subscriptionConfig();
-      vi.mocked(QwenSubscriptionSession.prototype.getIdentity).mockReturnValue(
-        undefined,
-      );
-      vi.mocked(QwenSubscriptionSession.prototype.getModels).mockRejectedValue(
-        new Error('session_changed'),
-      );
-      await expect(
-        config.switchModel(AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-flash'),
-      ).rejects.toThrow('session_changed');
-      expect(QwenSubscriptionSession.prototype.getModels).toHaveBeenCalledTimes(
-        2,
-      );
-    });
-
-    it('refreshes explicitly and when switching back from another provider', async () => {
-      const config = await subscriptionConfig();
-      await config.refreshAuth(AuthType.QWEN_SUBSCRIPTION);
-      expect(QwenSubscriptionSession.prototype.getModels).toHaveBeenCalledTimes(
-        2,
-      );
-      await config.switchModel(AuthType.USE_OPENAI, 'other-model');
-      await config.switchModel(AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-flash');
-      expect(QwenSubscriptionSession.prototype.getModels).toHaveBeenCalledTimes(
-        3,
-      );
-    });
-
-    it('invalidates reuse after a failed explicit catalog refresh', async () => {
-      const config = await subscriptionConfig();
-      vi.mocked(
-        QwenSubscriptionSession.prototype.getModels,
-      ).mockRejectedValueOnce(new Error('catalog rejected'));
-      await expect(config.refreshSubscriptionModels()).rejects.toThrow(
-        'catalog rejected',
-      );
-      await config.switchModel(AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-flash');
-      expect(QwenSubscriptionSession.prototype.getModels).toHaveBeenCalledTimes(
-        3,
-      );
-    });
-
-    it('does not bind a catalog to a login that changed during refresh', async () => {
-      vi.mocked(
-        QwenSubscriptionSession.prototype.getModels,
-      ).mockImplementationOnce(async () => {
-        vi.mocked(
-          QwenSubscriptionSession.prototype.getIdentity,
-        ).mockReturnValue('account-b');
-        return { models: ['qwen3.8-max', 'qwen3.8-flash'], cached: false };
-      });
-      const config = await subscriptionConfig();
-      await config.switchModel(AuthType.QWEN_SUBSCRIPTION, 'qwen3.8-flash');
-      expect(QwenSubscriptionSession.prototype.getModels).toHaveBeenCalledTimes(
-        2,
-      );
-    });
-  });
-
   it('clears active authentication and generators without erasing other providers', async () => {
     const config = await initConfig({
       modelProvidersConfig: {
@@ -1469,11 +1190,9 @@ describe('Server Config (config.ts)', () => {
       },
     });
     stubContentGenerator();
-    await config.refreshAuth(AuthType.USE_GEMINI);
     const providers = config
       .getModelsConfig()
       .getAvailableModelsForAuthType(AuthType.USE_OPENAI);
-    config.setSubscriptionPlan('pro');
     const worker = backgroundTask('logout-worker', 'Active member worker');
     config.getBackgroundTaskRegistry().register(worker);
     const listener = vi.fn();
@@ -1483,7 +1202,6 @@ describe('Server Config (config.ts)', () => {
 
     expect(config.getAuthType()).toBeUndefined();
     expect(config.getCurrentAuthType()).toBeUndefined();
-    expect(config.getSubscriptionPlan()).toBeUndefined();
     expect(worker.abortController.signal.aborted).toBe(true);
     expect(() => config.getContentGenerator()).toThrow('Run /auth');
     expect(
@@ -1496,9 +1214,9 @@ describe('Server Config (config.ts)', () => {
         .getAvailableModelsForAuthType(AuthType.USE_OPENAI),
     ).toEqual(providers);
     expect(listener).toHaveBeenCalled();
-    await config.refreshAuth(AuthType.USE_GEMINI);
+    await config.refreshAuth(AuthType.USE_OPENAI);
     expect(config.getContentGenerator()).toBeDefined();
-    expect(config.getAuthType()).toBe(AuthType.USE_GEMINI);
+    expect(config.getAuthType()).toBe(AuthType.USE_OPENAI);
   });
 
   it('forwards usageStatisticsEnabled and proxy to the extension manager', () => {
@@ -11075,62 +10793,6 @@ describe('Server Config (config.ts)', () => {
           expect(registeredToolNames()).not.toContain(ToolNames.WEB_SEARCH);
         }
         expect(webSearchNotices(config)).toEqual([]);
-      } finally {
-        vi.unstubAllEnvs();
-      }
-    });
-
-    it.each([
-      [{}, true],
-      [{ safeMode: true }, false],
-      [{ bareMode: true }, false],
-      [{ webSearch: { enabled: false } }, false],
-      [{ disabledTools: [ToolNames.WEB_SEARCH] }, false],
-    ] satisfies Array<[Partial<ConfigParameters>, boolean]>)(
-      'registers subscription search while respecting restrictions %j',
-      async (overrides, expected) => {
-        vi.stubEnv('DEV', true);
-        process.env['DEV'] = 'true';
-        try {
-          await initConfig({
-            authType: AuthType.QWEN_SUBSCRIPTION,
-            model: 'qwen3.8-max',
-            ...overrides,
-          });
-          expect(registeredToolNames().includes(ToolNames.WEB_SEARCH)).toBe(
-            expected,
-          );
-        } finally {
-          vi.unstubAllEnvs();
-        }
-      },
-    );
-
-    it('activates search immediately after login and removes it when switching away', async () => {
-      vi.stubEnv('DEV', true);
-      process.env['DEV'] = 'true';
-      try {
-        const config = await initConfig({
-          authType: AuthType.USE_GEMINI,
-          model: 'qwen3.8-max',
-        });
-        expect(registeredToolNames()).not.toContain(ToolNames.WEB_SEARCH);
-        vi.spyOn(config, 'refreshSubscriptionModels').mockResolvedValue({
-          models: ['qwen3.8-max'],
-          cached: false,
-        });
-        stubContentGenerator();
-        await config.refreshAuth(AuthType.QWEN_SUBSCRIPTION);
-        expect(registeredToolNames()).toContain(ToolNames.WEB_SEARCH);
-        expect(config.getGeminiClient().setTools).toHaveBeenCalled();
-
-        registerFactory().mockClear();
-        vi.mocked(ToolRegistry.prototype.unregisterTool).mockClear();
-        await config.refreshAuth(AuthType.USE_GEMINI);
-        expect(ToolRegistry.prototype.unregisterTool).toHaveBeenCalledWith(
-          ToolNames.WEB_SEARCH,
-        );
-        expect(registeredToolNames()).not.toContain(ToolNames.WEB_SEARCH);
       } finally {
         vi.unstubAllEnvs();
       }

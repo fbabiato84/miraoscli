@@ -12,7 +12,6 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { SubscriptionOAuthError } from '@qwen-code/qwen-code-core/qwen/subscription-oauth-client.js';
 
 vi.mock('@qwen-code/qwen-code-core/qwen/subscription-session.js', () => ({
   QwenSubscriptionSession: class {
@@ -158,7 +157,7 @@ describe('buildModelEntries', () => {
     });
     expect(
       buildModelEntries(config, 'primary').map(({ label }) => label),
-    ).toEqual(['Qwen4', 'Flash', 'Max', 'API', 'API Max']);
+    ).toEqual(['API', 'Qwen4', 'Flash', 'Max', 'API Max']);
     expect(buildModelEntries(config, 'fast').map(({ label }) => label)).toEqual(
       catalog.map(({ label }) => label),
     );
@@ -213,7 +212,7 @@ describe('buildModelEntries', () => {
     } as Partial<Config>);
     const entries = buildModelEntries(config, 'primary');
     const ids = entries.map((entry) => entry.modelId);
-    expect(ids).toEqual(['m1', 'rt1']);
+    expect(ids).toEqual(['m1', 'oauth1', 'rt1']);
     expect(entries[0]?.key).toBe(
       buildModelSelectionKey(
         String(AuthType.USE_OPENAI),
@@ -231,7 +230,7 @@ describe('buildModelEntries', () => {
     } as Partial<Config>);
     expect(
       buildModelEntries(config, 'fast').map((entry) => entry.modelId),
-    ).toEqual(['m1', 'fast1', 'rt1']);
+    ).toEqual(['m1', 'fast1', 'oauth1', 'rt1']);
   });
 
   it('lists only image models in image mode', () => {
@@ -256,6 +255,17 @@ describe('buildModelEntries', () => {
       getAllConfiguredModels: (() =>
         models) as Config['getAllConfiguredModels'],
       getAuthType: () => AuthType.QWEN_OAUTH,
+    } as Partial<Config>);
+    expect(
+      buildModelEntries(config, 'primary').map((entry) => entry.modelId),
+    ).toContain('oauth1');
+  });
+
+  it('keeps OAuth rows even under another auth type', () => {
+    const config = stubConfig({
+      getAllConfiguredModels: (() =>
+        models) as Config['getAllConfiguredModels'],
+      getAuthType: () => AuthType.USE_OPENAI,
     } as Partial<Config>);
     expect(
       buildModelEntries(config, 'primary').map((entry) => entry.modelId),
@@ -303,14 +313,12 @@ describe('buildModelEntries', () => {
         entry.description,
       ]),
     );
-    // A plain row keeps no line under its title…
+    // A plain row keeps no line under its title, and an OAuth row only the
+    // runtime suffix does not apply to either.
     expect(byId.get('bare')).toBeUndefined();
-    // …a runtime row always gets one, and an OAuth row the switch-away notice.
     expect(byId.get('rt')).toBe('Runtime model');
     expect(byId.get('rt2')).toBe('Served live (Runtime)');
-    expect(byId.get('oa')).toBe(
-      'Discontinued — switch to Coding Plan or API Key',
-    );
+    expect(byId.get('oa')).toBeUndefined();
   });
 
   it('drops image rows the runtime cannot resolve', () => {
@@ -375,7 +383,7 @@ describe('applyModelSelection', () => {
     } as Partial<Config>);
   }
 
-  it('hides signed-out subscription entries while retaining an API-key model with the same id', () => {
+  it('retains an API-key model with the same id as a subscription entry', () => {
     const config = resolvedConfig({
       getAuthType: () => AuthType.QWEN_SUBSCRIPTION,
       getModel: () => 'qwen3.8-max',
@@ -393,14 +401,7 @@ describe('applyModelSelection', () => {
       ],
     });
     expect(
-      buildModelEntries(config, 'primary', false).map(
-        ({ authType }) => authType,
-      ),
-    ).toEqual([AuthType.USE_OPENAI]);
-    expect(
-      buildModelEntries(config, 'primary', true).map(
-        ({ authType }) => authType,
-      ),
+      buildModelEntries(config, 'primary').map(({ authType }) => authType),
     ).toEqual([AuthType.QWEN_SUBSCRIPTION, AuthType.USE_OPENAI]);
     expect(config.getModel()).toBe('qwen3.8-max');
     expect(config.getAuthType()).toBe(AuthType.QWEN_SUBSCRIPTION);
@@ -408,7 +409,7 @@ describe('applyModelSelection', () => {
 
   describe('primary mode (default selection)', () => {
     it.each([undefined, 'workspace', 'user'] as const)(
-      'shows only the subscription model selection with scope %s',
+      'keeps the subscription model selection with scope %s',
       async (persistScope) => {
         const switchModel = vi.fn(async () => {});
         const config = resolvedConfig({
@@ -442,7 +443,9 @@ describe('applyModelSelection', () => {
               : '';
         expect(outcome).toEqual({
           ok: true,
-          message: `Model: qwen3.8-max${suffix}`,
+          message:
+            `authType: qwen-subscription\nUsing model: qwen3.8-max${suffix}\n` +
+            'Base URL: https://gateway.example/v1\nAPI key: SUB…OKEN',
         });
         expect(switchModel).toHaveBeenCalled();
         expect(written).toContainEqual({
@@ -557,12 +560,12 @@ describe('applyModelSelection', () => {
       }
     });
 
-    it('explains expired subscription selection and still permits another provider', async () => {
+    it('explains an expired selection and still permits another provider', async () => {
       const config = resolvedConfig({
         getAuthType: () => AuthType.QWEN_SUBSCRIPTION,
         switchModel: vi.fn(async (authType: AuthType) => {
           if (authType === AuthType.QWEN_SUBSCRIPTION)
-            throw new SubscriptionOAuthError('session_changed');
+            throw new Error('Invalid credentials');
         }),
       });
       const { settings, written } = createFakeSettings();
@@ -580,7 +583,7 @@ describe('applyModelSelection', () => {
       expect(failed).toEqual({
         ok: false,
         error:
-          'Your login credentials are no longer valid. Run /auth to sign in again.',
+          "Failed to switch model to 'qwen3.8-flash'.\n\nInvalid credentials",
       });
       expect(written).toEqual([]);
       const switched = await applyModelSelection({
@@ -632,10 +635,16 @@ describe('applyModelSelection', () => {
       ).toBe(true);
     });
 
-    it('blocks discontinued qwen-oauth selections without switching', async () => {
+    it('switches a qwen-oauth selection through the API path', async () => {
       const switchModel = vi.fn(async () => {});
       const config = resolvedConfig({
         switchModel: switchModel as Config['switchModel'],
+        getContentGeneratorConfig: (() => ({
+          authType: AuthType.QWEN_OAUTH,
+          model: 'old-model',
+          baseUrl: undefined,
+          apiKey: undefined,
+        })) as Config['getContentGeneratorConfig'],
       });
       const { settings, written } = createFakeSettings();
       const entries = [
@@ -650,12 +659,17 @@ describe('applyModelSelection', () => {
         selectionKey: entries[0].key,
       });
 
-      expect(switchModel).not.toHaveBeenCalled();
-      expect(written).toEqual([]);
-      expect(outcome.ok).toBe(false);
-      if (!outcome.ok) {
-        expect(outcome.error).toContain('discontinued');
-      }
+      expect(switchModel).toHaveBeenCalledWith(
+        AuthType.QWEN_OAUTH,
+        'old-model',
+        expect.objectContaining({ baseUrl: undefined }),
+      );
+      expect(outcome.ok).toBe(true);
+      expect(written).toContainEqual({
+        scope: SettingScope.User,
+        key: 'model.name',
+        value: 'old-model',
+      });
     });
 
     it('passes runtime snapshot ids straight to switchModel', async () => {

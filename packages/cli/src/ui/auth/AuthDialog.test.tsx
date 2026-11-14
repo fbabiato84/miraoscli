@@ -8,7 +8,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { setTimeout as settleInput } from 'node:timers/promises';
 import { Box } from 'ink';
 import { AuthDialog } from './AuthDialog.js';
-import { SubscriptionDialog } from './SubscriptionDialog.js';
 import { LoadedSettings } from '../../config/settings.js';
 import type { Settings } from '../../config/settingsSchema.js';
 import type { Config } from '@qwen-code/qwen-code-core';
@@ -18,7 +17,7 @@ import { UIStateContext } from '../contexts/UIStateContext.js';
 import { UIActionsContext } from '../contexts/UIActionsContext.js';
 import type { UIState } from '../contexts/UIStateContext.js';
 import type { UIActions } from '../contexts/UIActionsContext.js';
-import { setLanguageAsync, t } from '../../i18n/index.js';
+import { setLanguageAsync } from '../../i18n/index.js';
 
 const discoverProviderModelsMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue(null),
@@ -28,16 +27,6 @@ vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@qwen-code/qwen-code-core')>()),
   discoverProviderModels: discoverProviderModelsMock,
 }));
-
-vi.mock('./SubscriptionDialog.js', async () => {
-  const { Text } = await import('ink');
-  const React = await import('react');
-  return {
-    SubscriptionDialog: vi.fn(() =>
-      React.createElement(Text, null, 'Real subscription session'),
-    ),
-  };
-});
 
 type UIStateOverrides = Partial<UIState> & Partial<UIState['auth']>;
 
@@ -213,11 +202,11 @@ const moveDownAndWaitForSelection = async (
 const QWENCLOUD_MAIN_LABEL = 'QwenCloud';
 
 const selectQwenCloud = async (
-  stdin: { write: (s: string) => void },
+  _stdin: { write: (s: string) => void },
   lastFrame: () => string | undefined,
 ) => {
-  await waitForSelectedOption(lastFrame, t('Qwen Account with Subscription'));
-  await moveDownAndWaitForSelection(stdin, lastFrame, QWENCLOUD_MAIN_LABEL);
+  // QwenCloud is the first entry now that the subscription entry is gone.
+  await waitForSelectedOption(lastFrame, QWENCLOUD_MAIN_LABEL);
 };
 
 const selectAlibabaModelStudio = async (
@@ -320,38 +309,6 @@ describe('AuthDialog', { timeout: 15000 }, () => {
     process.env = originalEnv;
   });
 
-  it('allows Escape to reach /model when the saved subscription model cannot initialize', async () => {
-    const empty = { settings: {}, originalSettings: {}, path: '' };
-    const saved = {
-      security: { auth: { selectedType: AuthType.QWEN_SUBSCRIPTION } },
-      model: { name: 'removed' },
-    };
-    const settings = new LoadedSettings(
-      empty,
-      empty,
-      { settings: saved, originalSettings: saved, path: '' },
-      empty,
-      true,
-      new Set(),
-    );
-    const closeAuthDialog = vi.fn();
-    const ui = renderAuthDialog(
-      settings,
-      {
-        authError:
-          'Failed to login. Message: The selected model, removed, is no longer available. Run /model to choose another model.',
-      },
-      { closeAuthDialog },
-    );
-    try {
-      await settleInput(150);
-      ui.stdin.write('\u001b');
-      await vi.waitFor(() => expect(closeAuthDialog).toHaveBeenCalledOnce());
-      expect(ui.lastFrame()).not.toContain('You must connect a provider');
-    } finally {
-      ui.unmount();
-    }
-  });
   itWhenTuiInputReliable.each([36, 100])(
     'keeps the full provider layout while navigating a short terminal at width %i',
     async (width) => {
@@ -480,7 +437,7 @@ describe('AuthDialog', { timeout: 15000 }, () => {
         { settings, config },
       );
 
-      await waitForSelectedOption(lastFrame, 'Qwen Account with Subscription');
+      await waitForSelectedOption(lastFrame, QWENCLOUD_MAIN_LABEL);
 
       const frame = lastFrame() ?? '';
       expect(frame).toContain('QwenCloud');
@@ -681,52 +638,6 @@ describe('AuthDialog', { timeout: 15000 }, () => {
   });
 
   describe('QWEN_DEFAULT_AUTH_TYPE environment variable', () => {
-    it('should select the auth type specified by QWEN_DEFAULT_AUTH_TYPE', () => {
-      // QWEN_OAUTH is the only valid AuthType that can be selected via env var
-      // API-KEY is not an AuthType enum value, so it cannot be selected this way
-      process.env['QWEN_DEFAULT_AUTH_TYPE'] = AuthType.QWEN_OAUTH;
-
-      const settings: LoadedSettings = new LoadedSettings(
-        {
-          settings: {
-            security: { auth: { selectedType: undefined } },
-            ui: { customThemes: {} },
-            mcpServers: {},
-          },
-          originalSettings: {
-            security: { auth: { selectedType: undefined } },
-            ui: { customThemes: {} },
-            mcpServers: {},
-          },
-          path: '',
-        },
-        {
-          settings: {},
-          originalSettings: {},
-          path: '',
-        },
-        {
-          settings: { ui: { customThemes: {} }, mcpServers: {} },
-          originalSettings: { ui: { customThemes: {} }, mcpServers: {} },
-          path: '',
-        },
-        {
-          settings: { ui: { customThemes: {} }, mcpServers: {} },
-          originalSettings: { ui: { customThemes: {} }, mcpServers: {} },
-          path: '',
-        },
-        true,
-        new Set(),
-      );
-
-      const { lastFrame } = renderAuthDialog(settings);
-
-      // QWEN OAuth no longer has a UI entry; the dialog falls back to the
-      // default first option, Qwen Account with Subscription.
-      expectSelectedOption(lastFrame(), 'Qwen Account with Subscription');
-      expect(lastFrame()).toContain('Alibaba ModelStudio');
-    });
-
     it('should fall back to default if QWEN_DEFAULT_AUTH_TYPE is not set', () => {
       const settings: LoadedSettings = new LoadedSettings(
         {
@@ -763,8 +674,8 @@ describe('AuthDialog', { timeout: 15000 }, () => {
 
       const { lastFrame } = renderAuthDialog(settings);
 
-      // Default is Qwen Account with Subscription (first option).
-      expectSelectedOption(lastFrame(), 'Qwen Account with Subscription');
+      // QwenCloud is the first option.
+      expectSelectedOption(lastFrame(), 'QwenCloud');
       expect(lastFrame()).toContain('Alibaba ModelStudio');
     });
 
@@ -807,8 +718,8 @@ describe('AuthDialog', { timeout: 15000 }, () => {
       const { lastFrame } = renderAuthDialog(settings);
 
       // Since the auth dialog doesn't show QWEN_DEFAULT_AUTH_TYPE errors anymore,
-      // it will just show the default first option, Qwen Account with Subscription.
-      expectSelectedOption(lastFrame(), 'Qwen Account with Subscription');
+      // it will just show the default first option, QwenCloud.
+      expectSelectedOption(lastFrame(), 'QwenCloud');
       expect(lastFrame()).toContain('Alibaba ModelStudio');
     });
   });
@@ -864,7 +775,7 @@ describe('AuthDialog', { timeout: 15000 }, () => {
         { closeAuthDialog },
         undefined, // config.getAuthType() returns undefined
       );
-      await waitForSelectedOption(lastFrame, 'Qwen Account with Subscription');
+      await waitForSelectedOption(lastFrame, 'QwenCloud');
 
       // Simulate pressing escape key
       stdin.write('\u001b'); // ESC key
@@ -908,10 +819,7 @@ describe('AuthDialog', { timeout: 15000 }, () => {
         { closeAuthDialog },
       );
       try {
-        await waitForSelectedOption(
-          ui.lastFrame,
-          'Qwen Account with Subscription',
-        );
+        await waitForSelectedOption(ui.lastFrame, 'QwenCloud');
         ui.stdin.write('\u001b');
         await vi.waitFor(() => expect(closeAuthDialog).toHaveBeenCalledOnce());
         expect(ui.lastFrame()).not.toContain('You must connect a provider');
@@ -2336,158 +2244,6 @@ describe('AuthDialog Custom API Key Wizard', { timeout: 15000 }, () => {
       );
       await waitForSelectedOption(lastFrame, 'Responses');
 
-      unmount();
-    },
-  );
-});
-
-describe('subscription entry', () => {
-  let originalEnv: NodeJS.ProcessEnv;
-  beforeEach(() => {
-    originalEnv = { ...process.env };
-    delete process.env['DEV'];
-    process.env['QWEN_OAUTH_BASE_URL'] = 'https://auth.qwen.ai';
-    vi.clearAllMocks();
-  });
-  afterEach(() => {
-    process.env = originalEnv;
-  });
-
-  const settings = () => {
-    const empty = () => ({ settings: {}, originalSettings: {}, path: '' });
-    return new LoadedSettings(
-      empty(),
-      empty(),
-      empty(),
-      empty(),
-      true,
-      new Set(),
-    );
-  };
-
-  it.each([
-    'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    'https://api.deepseek.com',
-  ])(
-    'starts on the subscription entry with active provider %s',
-    async (baseUrl) => {
-      const config = {
-        getContentGeneratorConfig: () => ({ baseUrl }),
-      } as unknown as Config;
-      const ui = renderWithProviders(
-        <UIStateContext.Provider value={createMockUIState()}>
-          <UIActionsContext.Provider value={createMockUIActions()}>
-            <AuthDialog />
-          </UIActionsContext.Provider>
-        </UIStateContext.Provider>,
-        { settings: settings(), config },
-      );
-      try {
-        await waitForSelectedOption(
-          ui.lastFrame,
-          'Qwen Account with Subscription',
-        );
-      } finally {
-        ui.unmount();
-      }
-    },
-  );
-
-  it.each([36, 100])(
-    'keeps the subscription entry and full menu at width %i',
-    async (width) => {
-      const state = createMockUIState({ mainAreaWidth: width });
-      const actions = createMockUIActions();
-      const config = {
-        getAuthType: () => undefined,
-        getContentGeneratorConfig: () => undefined,
-      } as unknown as Config;
-      const ui = renderWithProviders(
-        <UIStateContext.Provider value={state}>
-          <UIActionsContext.Provider value={actions}>
-            <Box width={width} flexDirection="column">
-              <AuthDialog />
-            </Box>
-          </UIActionsContext.Provider>
-        </UIStateContext.Provider>,
-        { settings: settings(), config },
-      );
-      try {
-        await waitForSelectedOption(
-          ui.lastFrame,
-          'Qwen Account with Subscription',
-        );
-        expect(ui.lastFrame()).toContain('New');
-        expect(ui.lastFrame()).toContain('Custom Provider');
-        expect(ui.lastFrame()?.replace(/[│\s]/g, '')).toContain(
-          'TermsofServicesandPrivacyNotice:',
-        );
-      } finally {
-        ui.unmount();
-      }
-    },
-  );
-
-  it('uses the real subscription view when an OAuth origin is configured', async () => {
-    process.env['QWEN_OAUTH_BASE_URL'] = 'https://auth.qwen.ai';
-    const handleProviderSubmit = vi.fn();
-    const ui = renderAuthDialog(settings(), {}, { handleProviderSubmit });
-    try {
-      await waitForSelectedOption(
-        ui.lastFrame,
-        'Qwen Account with Subscription',
-      );
-      await pressEnterAndWaitFor(
-        ui.stdin,
-        ui.lastFrame,
-        'Real subscription session',
-      );
-      expect(ui.lastFrame()).not.toContain('Local Mock');
-      expect(handleProviderSubmit).not.toHaveBeenCalled();
-    } finally {
-      ui.unmount();
-    }
-  });
-
-  it('shows the entry without development or OAuth configuration', () => {
-    delete process.env['QWEN_OAUTH_BASE_URL'];
-    const { lastFrame, unmount } = renderAuthDialog(settings());
-    expect(lastFrame()).toContain('Qwen Account with Subscription');
-    unmount();
-  });
-
-  it('switches from subscription to the full provider selector', async () => {
-    const ui = renderAuthDialog(settings());
-    try {
-      await waitForSelectedOption(
-        ui.lastFrame,
-        'Qwen Account with Subscription',
-      );
-      await pressEnterAndWaitFor(
-        ui.stdin,
-        ui.lastFrame,
-        'Real subscription session',
-      );
-      const props = vi.mocked(SubscriptionDialog).mock.calls.at(-1)![0];
-      props.onSwitchProvider();
-      await vi.waitFor(() =>
-        expect(ui.lastFrame()).toContain('Custom Provider'),
-      );
-      expect(ui.lastFrame()).toContain('QwenCloud');
-      expect(ui.lastFrame()).toContain('Alibaba ModelStudio');
-      expect(ui.lastFrame()).toContain('Third-party Providers');
-    } finally {
-      ui.unmount();
-    }
-  });
-
-  it.each([undefined, 'false', 'true'])(
-    'shows the subscription entry when DEV=%s',
-    (dev) => {
-      if (dev === undefined) delete process.env['DEV'];
-      else process.env['DEV'] = dev;
-      const { lastFrame, unmount } = renderAuthDialog(settings());
-      expect(lastFrame()).toContain('Qwen Account with Subscription');
       unmount();
     },
   );

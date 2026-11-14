@@ -34,7 +34,6 @@ export class OpenAIContentGenerator implements ContentGenerator {
       errorHandler: new EnhancedErrorHandler(
         (error: unknown, request: GenerateContentParameters) =>
           this.shouldSuppressErrorLogging(error, request),
-        contentGeneratorConfig.authType,
       ),
     };
 

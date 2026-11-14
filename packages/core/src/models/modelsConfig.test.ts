@@ -4,15 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ModelsConfig } from './modelsConfig.js';
 import type { ModelsConfigOptions } from './modelsConfig.js';
 import { AuthType } from '../core/contentGenerator.js';
-import {
-  QWEN_SUBSCRIPTION_BASE_URL,
-  QWEN_SUBSCRIPTION_MODEL,
-  QWEN_SUBSCRIPTION_TOKEN_PLACEHOLDER,
-} from '../qwen/oauth-config.js';
 import type { ContentGeneratorConfig } from '../core/contentGenerator.js';
 import type { ModelConfig, ModelProvidersConfig } from './types.js';
 import type { ConfigSource, ConfigSources } from '../utils/configResolver.js';
@@ -572,21 +567,6 @@ describe('ModelsConfig', () => {
     // it should be re-resolved by other layers in refreshAuth
   });
 
-  it('should always force Qwen OAuth apiKey placeholder when applying model defaults', async () => {
-    // Simulate a stale/explicit apiKey existing before switching models.
-    const modelsConfig = new ModelsConfig({
-      initialAuthType: AuthType.QWEN_OAUTH,
-      generationConfig: { apiKey: 'manual-key-should-not-leak' },
-    });
-
-    // Switching within qwen-oauth triggers applyResolvedModelDefaults().
-    await modelsConfig.switchModel(AuthType.QWEN_OAUTH, 'coder-model');
-
-    const gc = currentGenerationConfig(modelsConfig);
-    expect(gc.apiKey).toBe('QWEN_OAUTH_DYNAMIC_TOKEN');
-    expect(gc.apiKeyEnvKey).toBeUndefined();
-  });
-
   it('should apply extra_body and customHeaders from model provider config', async () => {
     const modelsConfig = openaiConfig([
       entry('model-with-extras', 'Model With Extras', API_URL, 'API_KEY', {
@@ -607,37 +587,33 @@ describe('ModelsConfig', () => {
     expect(sources['customHeaders']?.kind).toBe('modelProviders');
   });
 
-  it('should apply Qwen OAuth apiKey placeholder during syncAfterAuthRefresh for fresh users', () => {
-    // Fresh user: authType not selected yet (currentAuthType undefined).
-    const modelsConfig = new ModelsConfig();
-
-    // Config.refreshAuth passes modelId from modelsConfig.getModel(), which falls back to DEFAULT_QWEN_MODEL.
-    modelsConfig.syncAfterAuthRefresh(
-      AuthType.QWEN_OAUTH,
-      modelsConfig.getModel(),
-    );
-
-    const gc = currentGenerationConfig(modelsConfig);
-    expect(gc.model).toBe('coder-model');
-    expect(gc.apiKey).toBe('QWEN_OAUTH_DYNAMIC_TOKEN');
-    expect(gc.apiKeyEnvKey).toBeUndefined();
-  });
-
-  it('should use default model for new authType when switching from different authType with env vars', () => {
+  it('should use the registered default model for a new authType when the current model is not registered', () => {
     // Cold start with OPENAI_MODEL / OPENAI_API_KEY: the model is set but no
     // authType is selected yet.
     const modelsConfig = new ModelsConfig({
+      modelProvidersConfig: {
+        anthropic: [
+          entry(
+            'anthropic-model-1',
+            'Anthropic Model 1',
+            'https://api.anthropic.com/v1',
+            'ANTHROPIC_API_KEY',
+          ),
+        ],
+      },
       generationConfig: { model: 'gpt-4o', apiKey: 'openai-key-from-env' },
     });
 
-    // Switching to qwen-oauth via AuthDialog refreshes with gpt-4o, which is
-    // not in the qwen-oauth registry, so the qwen-oauth default must win.
-    modelsConfig.syncAfterAuthRefresh(AuthType.QWEN_OAUTH, 'gpt-4o');
+    // Switching to anthropic refreshes with gpt-4o, which is not in the
+    // anthropic registry, so the registry default must win.
+    modelsConfig.syncAfterAuthRefresh(AuthType.USE_ANTHROPIC, 'gpt-4o');
 
     const gc = currentGenerationConfig(modelsConfig);
-    expect(gc.model).toBe('coder-model');
-    expect(gc.apiKey).toBe('QWEN_OAUTH_DYNAMIC_TOKEN');
-    expect(gc.apiKeyEnvKey).toBeUndefined();
+    expect(gc.model).toBe('anthropic-model-1');
+    // The env key name is recorded even when the variable is unset, so the
+    // credential is resolved later instead of being baked in here.
+    expect(gc.apiKey).toBeUndefined();
+    expect(gc.apiKeyEnvKey).toBe('ANTHROPIC_API_KEY');
   });
 
   const manualOpenAIConfig = (
@@ -659,20 +635,6 @@ describe('ModelsConfig', () => {
     });
     return modelsConfig;
   };
-
-  it('should clear manual credentials when switching from USE_OPENAI to QWEN_OAUTH', () => {
-    const modelsConfig = manualOpenAIConfig();
-
-    // Leaving USE_OPENAI clears the manual credentials (baseUrl included)
-    // and applies the qwen-oauth default model.
-    modelsConfig.syncAfterAuthRefresh(AuthType.QWEN_OAUTH, 'gpt-4o');
-
-    const gc = currentGenerationConfig(modelsConfig);
-    expect(gc.model).toBe('coder-model');
-    expect(gc.apiKey).toBe('QWEN_OAUTH_DYNAMIC_TOKEN');
-    expect(gc.baseUrl).toBe('DYNAMIC_QWEN_OAUTH_BASE_URL');
-    expect(gc.apiKeyEnvKey).toBeUndefined();
-  });
 
   it('should preserve manual credentials when switching to USE_OPENAI', () => {
     const modelsConfig = manualOpenAIConfig({
@@ -1073,7 +1035,7 @@ describe('ModelsConfig', () => {
 
     // no model provided (empty string fallback)
     const config3 = withGeneration({});
-    expect(config3.getModel()).toBe('coder-model'); // Falls back to DEFAULT_QWEN_MODEL
+    expect(config3.getModel()).toBe('');
     expect(config3.getGenerationConfig().model).toBeUndefined();
   });
 
@@ -1216,28 +1178,6 @@ describe('ModelsConfig', () => {
     });
   });
 
-  it('refreshes model-derived modalities when hot-switching to the default qwen-oauth model', async () => {
-    // Start on qwen-oauth with a text-only model so modalities are empty.
-    const modelsConfig = new ModelsConfig({
-      initialAuthType: AuthType.QWEN_OAUTH,
-      generationConfig: { model: 'qwen3-coder-flash', modalities: {} },
-      generationConfigSources: {
-        modalities: { kind: 'computed', detail: 'auto-detected from model' },
-      },
-    });
-
-    // Hot-update to coder-model (DEFAULT_QWEN_MODEL), which accepts images.
-    // Without refreshing model-derived defaults the previous model's empty
-    // modalities would linger and the vision-bridge gate would misfire.
-    await modelsConfig.setModel('coder-model');
-
-    expect(modelsConfig.getModel()).toBe('coder-model');
-    expect(modelsConfig.getGenerationConfig().modalities).toEqual({
-      image: true,
-      video: true,
-    });
-  });
-
   it('rolls back raw model state when owner refresh fails', async () => {
     const modelsConfig = new ModelsConfig({
       initialAuthType: AuthType.USE_OPENAI,
@@ -1279,16 +1219,7 @@ describe('ModelsConfig', () => {
   });
 
   describe('getAllConfiguredModels', () => {
-    // True when every model before the first non-qwen-oauth one is qwen-oauth.
-    const qwenFirst = (
-      models: ReturnType<ModelsConfig['getAllConfiguredModels']>,
-      firstNonQwenIndex: number,
-    ) =>
-      models
-        .slice(0, firstNonQwenIndex)
-        .every((m) => m.authType === AuthType.QWEN_OAUTH);
-
-    it('should return all models across all authTypes and put qwen-oauth first', () => {
+    it('should return all models across all authTypes', () => {
       const modelsConfig = new ModelsConfig({
         modelProvidersConfig: {
           openai: [
@@ -1326,21 +1257,6 @@ describe('ModelsConfig', () => {
 
       const allModels = modelsConfig.getAllConfiguredModels();
 
-      // qwen-oauth models (hard-coded) come first, then the registry ones.
-      const firstNonQwenIndex = allModels.findIndex(
-        (m) => m.authType !== AuthType.QWEN_OAUTH,
-      );
-      expect(firstNonQwenIndex).toBeGreaterThan(0);
-      expect(qwenFirst(allModels, firstNonQwenIndex)).toBe(true);
-      expect(
-        allModels
-          .slice(firstNonQwenIndex)
-          .every((m) => m.authType !== AuthType.QWEN_OAUTH),
-      ).toBe(true);
-      expect(ofAuthType(allModels, AuthType.QWEN_OAUTH).length).toBeGreaterThan(
-        0,
-      );
-
       const openaiModels = ofAuthType(allModels, AuthType.USE_OPENAI);
       expect(openaiModels.length).toBe(2);
       expect(openaiModels.map((m) => m.id)).toContain('openai-model-1');
@@ -1358,11 +1274,7 @@ describe('ModelsConfig', () => {
     it('should return empty array when no models are registered', () => {
       const allModels = new ModelsConfig().getAllConfiguredModels();
 
-      // Should still include qwen-oauth models (hard-coded)
-      expect(allModels.length).toBeGreaterThan(0);
-      expect(ofAuthType(allModels, AuthType.QWEN_OAUTH).length).toBeGreaterThan(
-        0,
-      );
+      expect(allModels).toEqual([]);
     });
 
     it('should return models with correct structure', () => {
@@ -1394,7 +1306,7 @@ describe('ModelsConfig', () => {
       expect(testModel?.capabilities?.vision).toBe(true);
     });
 
-    it('should support filtering by authTypes and still put qwen-oauth first when included', () => {
+    it('should support filtering by authTypes', () => {
       const modelsConfig = new ModelsConfig({
         modelProvidersConfig: {
           openai: [
@@ -1416,7 +1328,6 @@ describe('ModelsConfig', () => {
         },
       });
 
-      // OpenAI only: no qwen-oauth.
       const openaiOnly = modelsConfig.getAllConfiguredModels([
         AuthType.USE_OPENAI,
       ]);
@@ -1425,18 +1336,13 @@ describe('ModelsConfig', () => {
       );
       expect(openaiOnly.map((m) => m.id)).toContain('openai-model-1');
 
-      // qwen-oauth requested later is still ordered first.
-      const withQwen = modelsConfig.getAllConfiguredModels([
+      const withAnthropic = modelsConfig.getAllConfiguredModels([
         AuthType.USE_OPENAI,
-        AuthType.QWEN_OAUTH,
         AuthType.USE_ANTHROPIC,
       ]);
-      expect(withQwen.length).toBeGreaterThan(0);
-      const firstNonQwenIndex = withQwen.findIndex(
-        (m) => m.authType !== AuthType.QWEN_OAUTH,
-      );
-      expect(firstNonQwenIndex).toBeGreaterThan(0);
-      expect(qwenFirst(withQwen, firstNonQwenIndex)).toBe(true);
+      expect(withAnthropic.length).toBe(2);
+      expect(ofAuthType(withAnthropic, AuthType.USE_OPENAI)).toHaveLength(1);
+      expect(ofAuthType(withAnthropic, AuthType.USE_ANTHROPIC)).toHaveLength(1);
     });
 
     // An OPENAI_*-derived runtime model with no registry entry.
@@ -1474,11 +1380,6 @@ describe('ModelsConfig', () => {
       expect(openaiModel).toBeDefined();
       expect(openaiModel?.id).toBe('my-openai-model');
       expect(openaiModel?.isRuntimeModel).toBe(true);
-
-      // qwen-oauth registry models still come first and are still listed.
-      expect(allModels.some((m) => m.authType === AuthType.QWEN_OAUTH)).toBe(
-        true,
-      );
     });
 
     it('should not inject the runtime model when an explicit authType filter excludes it', () => {
@@ -1487,12 +1388,12 @@ describe('ModelsConfig', () => {
       const modelsConfig = envRuntimeConfig();
       modelsConfig.detectAndCaptureRuntimeModel();
 
-      const qwenOnly = modelsConfig.getAllConfiguredModels([
-        AuthType.QWEN_OAUTH,
+      const anthropicOnly = modelsConfig.getAllConfiguredModels([
+        AuthType.USE_ANTHROPIC,
       ]);
-      expect(qwenOnly.every((m) => m.authType === AuthType.QWEN_OAUTH)).toBe(
-        true,
-      );
+      expect(
+        anthropicOnly.every((m) => m.authType === AuthType.USE_ANTHROPIC),
+      ).toBe(true);
     });
   });
 
@@ -1882,21 +1783,6 @@ describe('ModelsConfig', () => {
       expect(modelsConfig.getAllConfiguredModels()).toEqual(builtInModels);
     });
 
-    it('should preserve qwen-oauth models after reload', () => {
-      const modelsConfig = new ModelsConfig({
-        modelProvidersConfig: { openai: [{ id: 'gpt-4', name: 'GPT-4' }] },
-      });
-      const qwenCount = () =>
-        ofAuthType(modelsConfig.getAllConfiguredModels(), 'qwen-oauth').length;
-      const initialQwenCount = qwenCount();
-
-      modelsConfig.reloadModelProvidersConfig({
-        gemini: [{ id: 'gemini-pro', name: 'Gemini Pro' }],
-      });
-
-      expect(qwenCount()).toBe(initialQwenCount);
-    });
-
     it('should handle reload with undefined config', () => {
       const modelsConfig = new ModelsConfig({
         modelProvidersConfig: { openai: [{ id: 'gpt-4', name: 'GPT-4' }] },
@@ -2172,66 +2058,3 @@ describe('ModelsConfig', () => {
     });
   });
 });
-
-describe('Qwen Subscription model selection', () => {
-  afterEach(() => vi.unstubAllEnvs());
-
-  it('switches from an API key provider without retaining its credentials or extras', async () => {
-    vi.stubEnv('DEV', true);
-    process.env['DEV'] = 'true';
-    const changed = vi.fn();
-    const config = new ModelsConfig({
-      initialAuthType: AuthType.USE_OPENAI,
-      generationConfig: {
-        model: 'previous-model',
-        apiKey: 'previous-provider-key',
-        apiKeyEnvKey: 'OLD_KEY',
-        baseUrl: 'https://old.example/v1',
-        customHeaders: { Authorization: 'Bearer old-key' },
-        extra_body: { old_field: true },
-        modalities: { image: true },
-      },
-      onModelChange: changed,
-    });
-    await config.switchModel(
-      AuthType.QWEN_SUBSCRIPTION,
-      QWEN_SUBSCRIPTION_MODEL,
-    );
-    expect(config.getGenerationConfig()).toMatchObject({
-      model: QWEN_SUBSCRIPTION_MODEL,
-      apiKey: QWEN_SUBSCRIPTION_TOKEN_PLACEHOLDER,
-      baseUrl: QWEN_SUBSCRIPTION_BASE_URL,
-      apiKeyEnvKey: undefined,
-      customHeaders: undefined,
-      extra_body: undefined,
-      modalities: {},
-    });
-    expect(changed).toHaveBeenCalledWith(
-      AuthType.QWEN_SUBSCRIPTION,
-      true,
-      undefined,
-    );
-  });
-
-  it('restores the subscription selection with a placeholder token', () => {
-    vi.stubEnv('DEV', true);
-    process.env['DEV'] = 'true';
-    const config = new ModelsConfig({
-      initialAuthType: AuthType.QWEN_SUBSCRIPTION,
-    });
-    config.syncAfterAuthRefresh(
-      AuthType.QWEN_SUBSCRIPTION,
-      QWEN_SUBSCRIPTION_MODEL,
-    );
-    expect(config.getGenerationConfig()).toMatchObject({
-      model: QWEN_SUBSCRIPTION_MODEL,
-      apiKey: QWEN_SUBSCRIPTION_TOKEN_PLACEHOLDER,
-      baseUrl: QWEN_SUBSCRIPTION_BASE_URL,
-    });
-  });
-});
-
-vi.mock('../qwen/subscription-models.js', async (original) => ({
-  ...(await original<typeof import('../qwen/subscription-models.js')>()),
-  readCachedSubscriptionCatalog: vi.fn(() => ({ models: ['qwen3.8-max'] })),
-}));

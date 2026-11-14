@@ -27,11 +27,6 @@ import {
 import { AuthState } from '../types.js';
 import { setNestedPropertySafe } from '../../config/settingsUtils.js';
 
-const activate = vi.hoisted(() => vi.fn());
-vi.mock('./activate-subscription.js', () => ({
-  activateSubscription: activate,
-}));
-
 vi.mock('../hooks/useQwenAuth.js', () => ({
   useQwenAuth: vi.fn(() => ({
     qwenAuthState: {},
@@ -645,63 +640,4 @@ describe('maskApiKey', () => {
     const result = maskApiKey('  sk-or-v1-1234567890abcdef  ');
     expect(result).toBe('sk-...cdef');
   });
-});
-
-it('returns to the prompt and preserves the success summary after subscription activation', async () => {
-  activate.mockResolvedValue({
-    email: 'builder@example.com',
-    member_type: 'pro',
-  });
-  const config = { ...createConfig(), getModel: () => 'qwen3.8-max' };
-  const addItem = vi.fn();
-  const hook = renderHook(() =>
-    useAuthCommand(createSettings() as never, config as never, addItem),
-  );
-  act(() => hook.result.current.openAuthDialog());
-  expect(hook.result.current.isAuthDialogOpen).toBe(true);
-  await act(async () => {
-    await hook.result.current.handleSubscriptionSubmit(
-      new AbortController().signal,
-    );
-  });
-  expect(hook.result.current.isAuthDialogOpen).toBe(false);
-  expect(addItem).toHaveBeenCalledWith(
-    {
-      type: 'info',
-      text: '✓ Signed in successfully · builder@example.com\n✓ Current plan: Qwen Pro. Qwen Code is ready.\n  Model: qwen3.8-max. Run /upgrade to upgrade your plan, /usage to view usage, /model to switch models, or /effort to change reasoning effort.\n  Common commands: /usage   /upgrade   /model   /effort   /status   /logout',
-      presentation: 'subscription-success',
-    },
-    expect.any(Number),
-  );
-  hook.unmount();
-});
-
-it('does not close or publish success if activation fails or is cancelled', async () => {
-  const addItem = vi.fn();
-  const hook = renderHook(() =>
-    useAuthCommand(createSettings() as never, createConfig() as never, addItem),
-  );
-  act(() => hook.result.current.openAuthDialog());
-  activate.mockRejectedValueOnce(new Error('activation failed'));
-  await act(async () => {
-    await expect(
-      hook.result.current.handleSubscriptionSubmit(
-        new AbortController().signal,
-      ),
-    ).rejects.toThrow('activation failed');
-  });
-  const controller = new AbortController();
-  controller.abort();
-  activate.mockResolvedValue({
-    email: 'builder@example.com',
-    member_type: 'pro',
-  });
-  await act(async () => {
-    await expect(
-      hook.result.current.handleSubscriptionSubmit(controller.signal),
-    ).rejects.toThrow();
-  });
-  expect(hook.result.current.isAuthDialogOpen).toBe(true);
-  expect(addItem).not.toHaveBeenCalled();
-  hook.unmount();
 });

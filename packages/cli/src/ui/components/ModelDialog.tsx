@@ -5,8 +5,6 @@
  */
 
 import type React from 'react';
-import { SubscriptionOAuthError } from '@qwen-code/qwen-code-core/qwen/subscription-oauth-client.js';
-import { subscriptionErrorMessage } from '@qwen-code/qwen-code-core/qwen/subscription-errors.js';
 import process from 'node:process';
 import { useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { Box, Text } from 'ink';
@@ -36,11 +34,6 @@ import { getPersistScopeForModelSelection } from '../../config/modelProvidersSco
 import { switchPrimaryModel } from '../models/primary-model-switch.js';
 import { t } from '../../i18n/index.js';
 import { publicProviderBaseUrl } from '../../utils/acpModelUtils.js';
-import {
-  filterModelEntriesForDisplay,
-  sortModelEntriesForDisplay,
-} from '../../utils/model-display-order.js';
-import { useSubscriptionSignedIn } from '../hooks/use-subscription-command-visibility.js';
 import {
   formatUnsupportedVoiceModelMessage,
   isSelectableVoiceModel,
@@ -291,15 +284,13 @@ function handleModelSwitchSuccess({
   const feedbackItem = {
     type: 'info' as const,
     text:
-      effectiveAuthType === AuthType.QWEN_SUBSCRIPTION
-        ? t('Model: {{model}}', { model: effectiveModelId }) + scopeSuffix
-        : `authType: ${effectiveAuthType ?? `(${t('none')})`}` +
-          `\n` +
-          `Using ${isRuntime ? 'runtime ' : ''}model: ${effectiveModelId}${scopeSuffix}` +
-          `\n` +
-          `Base URL: ${baseUrl}` +
-          `\n` +
-          `API key: ${maskedKey}`,
+      `authType: ${effectiveAuthType ?? `(${t('none')})`}` +
+      `\n` +
+      `Using ${isRuntime ? 'runtime ' : ''}model: ${effectiveModelId}${scopeSuffix}` +
+      `\n` +
+      `Base URL: ${baseUrl}` +
+      `\n` +
+      `API key: ${maskedKey}`,
   };
   uiState?.historyManager.addItem(feedbackItem, Date.now());
   config.getChatRecordingService?.()?.recordSlashCommand({
@@ -347,7 +338,6 @@ export function ModelDialog({
   const config = useContext(ConfigContext);
   const uiState = useContext(UIStateContext);
   const settings = useSettings();
-  const subscriptionSignedIn = useSubscriptionSignedIn();
 
   // Local error state for displaying errors within the dialog
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -401,8 +391,6 @@ export function ModelDialog({
         : m.imageOnly !== true;
       return (
         !m.isRuntimeModel &&
-        (m.authType !== AuthType.QWEN_OAUTH ||
-          authType === AuthType.QWEN_OAUTH) &&
         isSelectableImageModel &&
         (isFastModelMode ||
           (isAdvisorModelMode && isAvailableAdvisorModel) ||
@@ -425,10 +413,8 @@ export function ModelDialog({
       modelsByAuthTypeMap.get(authType)!.push(model);
     }
 
-    // Fixed order: qwen-oauth first, then others in a stable order
+    // Stable display order for the configured auth types
     const authTypeOrder: AuthType[] = [
-      AuthType.QWEN_OAUTH,
-      AuthType.QWEN_SUBSCRIPTION,
       AuthType.USE_OPENAI,
       AuthType.USE_OPENAI_RESPONSES,
       AuthType.USE_ANTHROPIC,
@@ -467,28 +453,14 @@ export function ModelDialog({
       }
     }
 
-    const visibleEntries = filterModelEntriesForDisplay(
-      result,
-      subscriptionSignedIn,
-    );
-    return isFastModelMode ||
-      isAdvisorModelMode ||
-      isVoiceModelMode ||
-      isVisionModelMode ||
-      isCompactionModelMode ||
-      isImageModelMode
-      ? visibleEntries
-      : sortModelEntriesForDisplay(visibleEntries);
+    return result;
   }, [
-    authType,
-    subscriptionSignedIn,
     config,
     isFastModelMode,
     isAdvisorModelMode,
     isImageModelMode,
     isVoiceModelMode,
     isVisionModelMode,
-    isCompactionModelMode,
   ]);
 
   const MODEL_OPTIONS = useMemo(() => {
@@ -503,19 +475,11 @@ export function ModelDialog({
                 isAdvisorModelMode ? model.registryBaseUrl : model.baseUrl,
               );
 
-        const isQwenOAuth = t2 === AuthType.QWEN_OAUTH;
-
         const title = (
           <Text>
             <Text
               bold
-              color={
-                isQwenOAuth
-                  ? theme.status.warning
-                  : isRuntime
-                    ? theme.status.warning
-                    : theme.text.accent
-              }
+              color={isRuntime ? theme.status.warning : theme.text.accent}
             >
               [{t2}]
             </Text>
@@ -527,21 +491,14 @@ export function ModelDialog({
               </Text>
             )}
             {isRuntime && <Text color={theme.status.warning}> (Runtime)</Text>}
-            {isQwenOAuth && !isRuntime && (
-              <Text color={theme.status.warning}> ({t('Discontinued')})</Text>
-            )}
           </Text>
         );
 
-        // Include runtime / discontinued indicator in description
         let description = model.description || '';
         if (isRuntime) {
           description = description
             ? `${description} (Runtime)`
             : 'Runtime model';
-        }
-        if (isQwenOAuth && !isRuntime) {
-          description = t('Discontinued — switch to Coding Plan or API Key');
         }
 
         return {
@@ -1154,25 +1111,6 @@ export function ModelDialog({
         return;
       }
 
-      // Block selection of discontinued qwen-oauth models
-      // (only block non-runtime OAuth; runtime OAuth models from existing
-      //  cached tokens are still allowed to work until the server rejects them)
-      const isQwenOAuthSelection =
-        selected.startsWith(`${AuthType.QWEN_OAUTH}::`) ||
-        (selected.startsWith('$runtime|') &&
-          selected.split('|')[1] === AuthType.QWEN_OAUTH);
-      const isRuntimeOAuthSelection = selected.startsWith(
-        `$runtime|${AuthType.QWEN_OAUTH}|`,
-      );
-      if (isQwenOAuthSelection && !isRuntimeOAuthSelection) {
-        setErrorMessage(
-          t(
-            'Qwen OAuth free tier was discontinued on 2026-04-15. Please select a model from another provider or run /auth to switch.',
-          ),
-        );
-        return;
-      }
-
       let after: ContentGeneratorConfig | undefined;
       let effectiveAuthType: AuthType | undefined;
       let effectiveModelId = selected;
@@ -1217,10 +1155,6 @@ export function ModelDialog({
             selectedAuthType,
             modelId,
             {
-              ...(selectedAuthType !== authType &&
-              selectedAuthType === AuthType.QWEN_OAUTH
-                ? { requireCachedCredentials: true }
-                : {}),
               baseUrl: selectedBaseUrl,
             },
           );
@@ -1240,10 +1174,6 @@ export function ModelDialog({
         effectiveAuthType = after?.authType ?? selectedAuthType ?? authType;
         effectiveModelId = after?.model ?? modelId;
       } catch (e) {
-        if (e instanceof SubscriptionOAuthError) {
-          setErrorMessage(t(subscriptionErrorMessage(e)));
-          return;
-        }
         const baseErrorMessage = e instanceof Error ? e.message : String(e);
         // Use parsed modelId for display to avoid showing raw selection key
         // (which contains invisible \0 separator between modelId and baseUrl)
@@ -1378,14 +1308,6 @@ export function ModelDialog({
             borderRight={false}
             borderColor={theme.border.default}
           />
-          {highlightedEntry.authType === AuthType.QWEN_OAUTH &&
-            !highlightedEntry.isRuntime && (
-              <Box marginTop={1}>
-                <Text color={theme.status.warning}>
-                  ⚠ {t('Discontinued — switch to Coding Plan or API Key')}
-                </Text>
-              </Box>
-            )}
           <DetailRow
             label={t('Modality')}
             value={formatModalities(highlightedEntry.model.modalities)}
@@ -1396,18 +1318,14 @@ export function ModelDialog({
               highlightedEntry.model.contextWindowSize,
             )}
           />
-          {highlightedEntry.authType !== AuthType.QWEN_OAUTH && (
-            <>
-              <DetailRow
-                label="Base URL"
-                value={highlightedEntry.model.baseUrl ?? t('(default)')}
-              />
-              <DetailRow
-                label="API Key"
-                value={highlightedEntry.model.envKey ?? t('(not set)')}
-              />
-            </>
-          )}
+          <DetailRow
+            label="Base URL"
+            value={highlightedEntry.model.baseUrl ?? t('(default)')}
+          />
+          <DetailRow
+            label="API Key"
+            value={highlightedEntry.model.envKey ?? t('(not set)')}
+          />
         </Box>
       )}
 

@@ -9,12 +9,6 @@ export function getDefaultApiKeyEnvVar(authType: string | undefined): string {
     case 'openai':
     case 'openai-responses':
       return 'OPENAI_API_KEY';
-    case 'anthropic':
-      return 'ANTHROPIC_API_KEY';
-    case 'gemini':
-      return 'GEMINI_API_KEY';
-    case 'vertex-ai':
-      return 'GOOGLE_API_KEY';
     default:
       return 'API_KEY';
   }
@@ -25,36 +19,9 @@ export function getDefaultModelEnvVar(authType: string | undefined): string {
     case 'openai':
     case 'openai-responses':
       return 'OPENAI_MODEL';
-    case 'anthropic':
-      return 'ANTHROPIC_MODEL';
-    case 'gemini':
-      return 'GEMINI_MODEL';
-    case 'vertex-ai':
-      return 'GOOGLE_MODEL';
     default:
       return 'MODEL';
   }
-}
-
-/**
- * Vertex AI has a keyless path, so pointing the user only at an API key
- * variable sends them toward a placeholder value, which the Google SDK then
- * treats as an Express mode key and the API rejects. Shared with the CLI's own
- * missing-key message so the two surfaces cannot drift.
- */
-export const VERTEX_ADC_HINT =
-  ' Alternatively, set GOOGLE_CLOUD_PROJECT to authenticate with Application Default Credentials instead of an API key.';
-
-/**
- * Only offered when the entry declares no key variable of its own: those
- * entries never take the ADC path, so suggesting a project there would be
- * advice that cannot work.
- */
-function adcHint(
-  authType: string | undefined,
-  explicitEnvKey: string | undefined,
-): string {
-  return authType === 'vertex-ai' && !explicitEnvKey ? VERTEX_ADC_HINT : '';
 }
 
 export abstract class ModelConfigError extends Error {
@@ -81,8 +48,7 @@ export class StrictMissingCredentialsError extends ModelConfigError {
       `Missing credentials for modelProviders model '${modelName}'. ` +
         (envKey
           ? `Current configured envKey: '${envKey}'. Set that environment variable, or update modelProviders.${providerKey}[].envKey.`
-          : `Configure modelProviders.${providerKey}[].envKey and set that environment variable.`) +
-        adcHint(authType, envKey),
+          : `Configure modelProviders.${providerKey}[].envKey and set that environment variable.`),
     );
   }
 }
@@ -112,8 +78,7 @@ export class MissingApiKeyError extends ModelConfigError {
       `Missing API key for ${params.authType} auth. ` +
         `Current model: '${params.model || '(unknown)'}', baseUrl: '${params.baseUrl || '(default)'}'. ` +
         `Provide an API key via settings (security.auth.apiKey), ` +
-        `or set the environment variable '${params.envKey}'.` +
-        adcHint(params.authType, params.explicitEnvKey),
+        `or set the environment variable '${params.envKey}'.`,
     );
   }
 }

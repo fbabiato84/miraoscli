@@ -9,10 +9,6 @@ import {
   formatSubscriptionQuotaDisplay,
   subscriptionQuotaDisplay,
 } from './subscription-quota.js';
-import {
-  subscriptionErrorMessage,
-  subscriptionHttpError,
-} from '../qwen/subscription-errors.js';
 
 const now = Date.parse('2026-11-04T00:00:00Z');
 const reset = (hours: number) => now / 1000 + hours * 3600;
@@ -80,21 +76,16 @@ describe('subscription quota presentation', () => {
     },
   );
 
-  it.each([
-    [429, 'insufficient_quota'],
-    [402, 'other_code'],
-    [403, 'membership_required'],
-  ])('requires both status and exact code (%s, %s)', (status, code) => {
-    expect(
-      subscriptionQuotaDisplay(status as number, { code }),
-    ).toBeUndefined();
-    expect(
-      subscriptionErrorMessage(
-        subscriptionHttpError(status as number, {
-          error: { code, message: 'Backend public text' },
-        }),
-      ),
-    ).toBe('Backend public text');
+  it('requires both status and exact code', () => {
+    expect(subscriptionQuotaDisplay(429, { code: 'insufficient_quota' })).toBe(
+      undefined,
+    );
+    expect(subscriptionQuotaDisplay(402, { code: 'other_code' })).toBe(
+      undefined,
+    );
+    expect(subscriptionQuotaDisplay(403, { code: 'membership_required' })).toBe(
+      undefined,
+    );
   });
 
   it('rounds up remaining hours without adding a day below 24 hours', () => {

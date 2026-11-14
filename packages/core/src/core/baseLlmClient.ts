@@ -24,7 +24,6 @@ import type {
 import { AuthType, createContentGenerator } from './contentGenerator.js';
 import type { ResolvedModelConfig } from '../models/types.js';
 import { buildAgentContentGeneratorConfig } from '../models/content-generator-config.js';
-import { QWEN_OAUTH_TOKEN_PLACEHOLDER } from '../qwen/oauth-config.js';
 import {
   buildModelIdContext,
   resolveModelId,
@@ -981,11 +980,8 @@ export class BaseLlmClient {
     }
 
     const allAuthTypes: AuthType[] = [
-      AuthType.QWEN_OAUTH,
       AuthType.USE_OPENAI,
-      AuthType.USE_VERTEX_AI,
-      AuthType.USE_ANTHROPIC,
-      AuthType.USE_GEMINI,
+      AuthType.USE_OPENAI_RESPONSES,
     ];
 
     const mainAuthType = this.config.getContentGeneratorConfig()?.authType;
@@ -1097,9 +1093,6 @@ export class BaseLlmClient {
             ...targetConfig.modalities,
             image: true,
           };
-        }
-        if (isolatedRoute && resolvedModel.authType === AuthType.QWEN_OAUTH) {
-          targetConfig.apiKey = QWEN_OAUTH_TOKEN_PLACEHOLDER;
         }
         return {
           contentGenerator: isolatedRoute

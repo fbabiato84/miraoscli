@@ -5,8 +5,6 @@
  */
 
 import type React from 'react';
-import { AuthType } from '@qwen-code/qwen-code-core/utils/auth-type.js';
-import { subscriptionModelUnavailable } from '@qwen-code/qwen-code-core/qwen/subscription-models.js';
 import { useState, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import Link from 'ink-link';
@@ -30,14 +28,12 @@ import { findExistingProviderModels } from '@qwen-code/qwen-code-core/providers/
 import type { ProviderConfig } from '@qwen-code/qwen-code-core/providers/types.js';
 import { useProviderSetupFlow } from './useProviderSetupFlow.js';
 import { ProviderSetupSteps } from './ProviderSetupSteps.js';
-import { SubscriptionDialog } from './SubscriptionDialog.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type ViewLevel =
-  | 'subscription'
   | 'main'
   | 'qwencloud-select'
   | 'alibaba-select'
@@ -45,7 +41,6 @@ type ViewLevel =
   | 'provider-setup';
 
 type MainOption =
-  | 'QWEN_SUBSCRIPTION'
   | 'QWENCLOUD'
   | 'ALIBABA_MODELSTUDIO'
   | 'THIRD_PARTY_PROVIDERS'
@@ -154,7 +149,6 @@ function ProviderMenu<T>({
     title: string;
     description: string;
     value: T;
-    isNew?: boolean;
   }>;
   initialIndex: number;
   onSelect: (value: T) => void;
@@ -181,16 +175,7 @@ function ProviderMenu<T>({
       </Text>
       <Box marginTop={1} flexShrink={0}>
         <DescriptiveRadioButtonSelect
-          items={items.map((item) => ({
-            ...item,
-            title: item.isNew ? (
-              <Text>
-                {item.title} <Text color={theme.text.accent}>New</Text>
-              </Text>
-            ) : (
-              item.title
-            ),
-          }))}
+          items={items}
           initialIndex={initialIndex}
           onSelect={onSelect}
           onHighlight={onHighlight}
@@ -230,28 +215,11 @@ export function AuthDialog(): React.JSX.Element {
     mainAreaWidth,
   } = useUIState();
   const {
-    auth: {
-      closeAuthDialog,
-      handleProviderSubmit,
-      handleSubscriptionSubmit,
-      onAuthError,
-    },
+    auth: { closeAuthDialog, handleProviderSubmit, onAuthError },
   } = useUIActions();
   const config = useConfig();
   const settings = useSettings();
-  const mainItems = [
-    {
-      key: 'QWEN_SUBSCRIPTION',
-      title: t('Qwen Account with Subscription'),
-      isNew: true,
-      label: t('Qwen Account with Subscription'),
-      description: t(
-        'Unlock Qwen Code + Agent with Plus/Pro Plan at chat.qwen.ai',
-      ),
-      value: 'QWEN_SUBSCRIPTION' as MainOption,
-    },
-    ...MAIN_ITEMS,
-  ];
+  const mainItems = MAIN_ITEMS;
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [viewLevel, setViewLevel] = useState<ViewLevel>('main');
@@ -375,9 +343,6 @@ export function AuthDialog(): React.JSX.Element {
   const handleMainSelect = (value: MainOption) => {
     clearErrors();
     switch (value) {
-      case 'QWEN_SUBSCRIPTION':
-        pushView('subscription');
-        break;
       case 'QWENCLOUD':
         pushView('qwencloud-select');
         break;
@@ -410,14 +375,7 @@ export function AuthDialog(): React.JSX.Element {
           goBack();
           return;
         }
-        if (
-          isAuthDialogDismissible ||
-          (settings.merged.security?.auth?.selectedType ===
-            AuthType.QWEN_SUBSCRIPTION &&
-            authError?.includes(
-              subscriptionModelUnavailable(config.getModel()),
-            ))
-        ) {
+        if (isAuthDialogDismissible) {
           closeAuthDialog();
           return;
         }
@@ -433,9 +391,7 @@ export function AuthDialog(): React.JSX.Element {
         closeAuthDialog();
       }
     },
-    {
-      isActive: viewLevel !== 'subscription',
-    },
+    { isActive: true },
   );
 
   // -- View title -----------------------------------------------------------
@@ -457,22 +413,6 @@ export function AuthDialog(): React.JSX.Element {
   }, [viewLevel, setupFlow.state]);
 
   // -- Render ---------------------------------------------------------------
-
-  if (viewLevel === 'subscription') {
-    return (
-      <SubscriptionDialog
-        onBack={goBack}
-        onModelSelectionRequired={closeAuthDialog}
-        onConnect={handleSubscriptionSubmit}
-        onSwitchProvider={() => {
-          clearErrors();
-          setViewStack([]);
-          setViewLevel('main');
-        }}
-        suppressBrowserLaunch={config.isBrowserLaunchSuppressed()}
-      />
-    );
-  }
 
   if (viewLevel === 'main') {
     return (

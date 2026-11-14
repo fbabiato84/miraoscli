@@ -6,7 +6,7 @@
 
 import { useMemo } from 'react';
 import { Box } from 'ink';
-import { AuthType } from '@qwen-code/qwen-code-core/utils/auth-type.js';
+import type { AuthType } from '@qwen-code/qwen-code-core/utils/auth-type.js';
 import { findProviderByCredentials } from '@qwen-code/qwen-code-core/providers/all-providers.js';
 import { resolveMetadataKey } from '@qwen-code/qwen-code-core/providers/provider-config.js';
 import { Header, AuthDisplayType } from './Header.js';
@@ -37,14 +37,7 @@ function getAuthDisplayType(
     return matched.label;
   }
 
-  switch (authType) {
-    case AuthType.QWEN_SUBSCRIPTION:
-      return 'Qwen Subscription';
-    case AuthType.QWEN_OAUTH:
-      return AuthDisplayType.QWEN_OAUTH;
-    default:
-      return AuthDisplayType.API_KEY;
-  }
+  return AuthDisplayType.API_KEY;
 }
 
 export const AppHeader = ({ version }: AppHeaderProps) => {
@@ -79,11 +72,6 @@ export const AppHeader = ({ version }: AppHeaderProps) => {
         <Header
           version={version}
           authDisplayType={authDisplayType}
-          subscriptionPlan={
-            authType === AuthType.QWEN_SUBSCRIPTION
-              ? config.getSubscriptionPlan()
-              : undefined
-          }
           model={model}
           workingDirectory={targetDir}
           customAsciiArt={resolvedBanner?.asciiArt}
@@ -91,7 +79,7 @@ export const AppHeader = ({ version }: AppHeaderProps) => {
           customBannerSubtitle={resolvedBanner?.subtitle}
         />
       )}
-      {showTips && authType !== AuthType.QWEN_SUBSCRIPTION && <Tips />}
+      {showTips && <Tips />}
     </Box>
   );
 };

@@ -23,12 +23,11 @@
  *  - a rejected install plan surfaces the error and keeps the dialog open.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import type { Config } from '@qwen-code/qwen-code-core';
 import type { LoadedSettings } from '../../config/settings.js';
-import { C } from './theme.js';
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -94,31 +93,6 @@ const mocks = vi.hoisted(() => {
   return { state, renderer, buildJsxRuntime };
 });
 
-const subscription = vi.hoisted(() => ({
-  state: {
-    status: 'waiting',
-  } as import('../auth/use-subscription.js').SubscriptionState,
-  email: 'real@example.com',
-  deviceAuth: {
-    verification_uri_complete:
-      'https://chat.qwen.ai/authorize?user_code=REAL-CODE&client=cli&entry=qwen_code&paywallScene=cli',
-  },
-  checking: false,
-  connecting: false,
-  connectionError: undefined as string | undefined,
-  modelSelectionRequired: false,
-  connect: vi.fn(),
-  canCheckAgain: false,
-  openPlans: vi.fn(),
-  checkAgain: vi.fn(),
-  switchAccount: vi.fn(),
-  cancel: vi.fn(),
-}));
-vi.mock('../auth/use-subscription.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../auth/use-subscription.js')>()),
-  useSubscription: () => subscription,
-}));
-
 const core = vi.hoisted(() => ({
   applyProviderInstallPlan: vi.fn(),
   logAuth: vi.fn(),
@@ -156,7 +130,7 @@ vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => {
 
 import { AuthType } from '@qwen-code/qwen-code-core';
 import * as coreRuntime from '@qwen-code/qwen-code-core';
-import { ICON, SPINNER_FRAMES, SPINNER_INTERVAL_MS } from '../constants.js';
+import { ICON } from '../constants.js';
 import { OpenTuiAuthDialog } from './dialogs-auth.js';
 import { setLanguageAsync } from '../../i18n/index.js';
 import * as providerSetupFlow from '../auth/useProviderSetupFlow.js';
@@ -327,7 +301,6 @@ async function runCustomProviderFlow(): Promise<{
   await press('down');
   await press('down');
   await press('down');
-  await press('down');
   await press('return'); // main: CUSTOM_PROVIDER → provider-setup (protocol)
   await press('return'); // protocol: OpenAI-compatible → API selection
   await press('return'); // API: Chat Completions → baseUrl input
@@ -349,7 +322,6 @@ async function runCustomProviderFlow(): Promise<{
 async function runPresetFlowToTerminalModels(): Promise<void> {
   renderDialog();
   await press('down');
-  await press('down');
   await press('down'); // main: THIRD_PARTY_PROVIDERS
   await press('return'); // → thirdparty-select, DeepSeek on top
   await press('return'); // DeepSeek → apiKey
@@ -368,39 +340,14 @@ describe('OpenTuiAuthDialog (#57 onboarding flow)', () => {
     core.logAuth.mockReset();
   });
 
-  it('renders the main menu with the five top-level options', () => {
+  it('renders the main menu with the four top-level options', () => {
     renderDialog();
     expect(screen.getByText('Connect a Provider')).toBeTruthy();
-    expect(screen.getByText('Qwen Account with Subscription')).toBeTruthy();
     expect(screen.getByText('QwenCloud')).toBeTruthy();
     expect(screen.getByText('Alibaba ModelStudio')).toBeTruthy();
     expect(screen.getByText('Third-party Providers')).toBeTruthy();
     expect(screen.getByText('Custom Provider')).toBeTruthy();
   });
-
-  it.each([
-    'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    'https://api.deepseek.com',
-  ])(
-    'starts on the subscription entry with active provider %s',
-    async (baseUrl) => {
-      const config = createMockConfig(AuthType.USE_OPENAI);
-      vi.mocked(config.getContentGeneratorConfig).mockReturnValue({
-        authType: AuthType.USE_OPENAI,
-        model: 'test-model',
-        baseUrl,
-      });
-      render(
-        <OpenTuiAuthDialog
-          config={config}
-          settings={createMockSettings()}
-          onClose={vi.fn()}
-        />,
-      );
-      await press('return');
-      expect(screen.getByText('Waiting for sign-in…')).toBeTruthy();
-    },
-  );
 
   it('blocks Esc on the main view while unauthenticated', async () => {
     const { onClose } = renderDialog();
@@ -463,7 +410,6 @@ describe('OpenTuiAuthDialog (#57 onboarding flow)', () => {
   it('navigates main → sub-menu and back with Esc', async () => {
     const { onClose } = renderDialog();
     await press('down');
-    await press('down');
     await press('return'); // main: Alibaba ModelStudio → alibaba-select
     expect(
       screen.getByText('Alibaba ModelStudio · Access Method'),
@@ -480,11 +426,10 @@ describe('OpenTuiAuthDialog (#57 onboarding flow)', () => {
       handler(baseKeyEvent({ name: 'down', sequence: '\x1b[B' }));
       handler(baseKeyEvent({ name: 'down', sequence: '\x1b[B' }));
       handler(baseKeyEvent({ name: 'down', sequence: '\x1b[B' }));
-      handler(baseKeyEvent({ name: 'down', sequence: '\x1b[B' }));
       handler(baseKeyEvent({ name: 'return', sequence: '\r' }));
     });
-    // Four downs land on Custom Provider. The cursor the handler was registered
-    // with still pointed at the subscription entry.
+    // Three downs land on Custom Provider. The cursor the handler was registered
+    // with still pointed at QwenCloud.
     expect(screen.getByText('OpenAI-compatible')).toBeTruthy();
     expect(screen.queryByText(/Access Method/)).toBeNull();
   });
@@ -506,9 +451,8 @@ describe('OpenTuiAuthDialog (#57 onboarding flow)', () => {
     await press('down');
     await press('down');
     await press('down');
-    await press('down');
     await press('return');
-    expect(screen.getByText('Waiting for sign-in…')).toBeTruthy();
+    expect(screen.getByText('Token Plan')).toBeTruthy();
   });
 
   it('keeps authentication open when only service models were saved', async () => {
@@ -565,7 +509,6 @@ describe('OpenTuiAuthDialog (#57 onboarding flow)', () => {
     await press('down');
     await press('down');
     await press('down');
-    await press('down');
     await press('return');
     expect(screen.getByText('OpenAI-compatible')).toBeTruthy();
     expect(screen.queryByText('OpenAI Responses')).toBeNull();
@@ -615,7 +558,6 @@ describe('OpenTuiAuthDialog (#57 onboarding flow)', () => {
     await press('down');
     await press('down');
     await press('down');
-    await press('down');
     await press('return'); // main: CUSTOM_PROVIDER → protocol
     await press('return'); // protocol: OpenAI-compatible → API
     // The parity RadioList gives the marker its own cell, so read it off the row.
@@ -647,7 +589,6 @@ describe('OpenTuiAuthDialog (#57 onboarding flow)', () => {
     await press('down');
     await press('down');
     await press('down');
-    await press('down');
     await press('return'); // main: CUSTOM_PROVIDER → protocol
     await press('return'); // protocol: OpenAI-compatible → API selection
     await press('return'); // API: Chat Completions → baseUrl input
@@ -665,7 +606,6 @@ describe('OpenTuiAuthDialog (#57 onboarding flow)', () => {
 
   it("renders ink's no-recommendations branch for a provider without models", async () => {
     renderDialog();
-    await press('down');
     await press('down');
     await press('down');
     await press('down');
@@ -760,7 +700,6 @@ describe('OpenTuiAuthDialog (#57 onboarding flow)', () => {
     await setLanguageAsync('zh');
     try {
       renderDialog();
-      await press('down');
       await press('return'); // main: QwenCloud → qwencloud-select
       expect(screen.getByText('千问AI平台 · 接入方式')).toBeTruthy();
       await press('return'); // Token Plan → provider-setup
@@ -775,7 +714,6 @@ describe('OpenTuiAuthDialog (#57 onboarding flow)', () => {
 
   it('shows Token Plan and Standard API Key in QwenCloud sub-menu but not Coding Plan (T3+T4)', async () => {
     renderDialog();
-    await press('down');
     await press('return'); // main: QwenCloud → qwencloud-select
     expect(screen.getByText('Token Plan')).toBeTruthy();
     expect(screen.getByText('Standard API Key')).toBeTruthy();
@@ -798,7 +736,6 @@ describe('bracketed-paste into dialog inputs (#57)', () => {
     await press('down');
     await press('down');
     await press('down');
-    await press('down');
     await press('return'); // main: CUSTOM_PROVIDER → protocol
     await press('return'); // protocol: OpenAI-compatible → API selection
     await press('return'); // API: Chat Completions → baseUrl input
@@ -809,7 +746,6 @@ describe('bracketed-paste into dialog inputs (#57)', () => {
   /** Walk the wizard up to the base-URL input step. */
   async function runToBaseUrlInput(): Promise<void> {
     renderDialog();
-    await press('down');
     await press('down');
     await press('down');
     await press('down');
@@ -1093,7 +1029,6 @@ describe('caret editing in dialog text fields (#107)', () => {
   /** Walk to the base-URL step, whose field starts empty. */
   async function runToBaseUrlStep(): Promise<void> {
     renderDialog();
-    await press('down');
     await press('down');
     await press('down');
     await press('down');
@@ -1549,7 +1484,6 @@ describe('recommended-model checkboxes out of one read (#113)', () => {
   async function runToModelsStep(availableTerminalHeight?: number) {
     const dialog = renderDialog({ availableTerminalHeight });
     await press('down');
-    await press('down');
     await press('down'); // main: THIRD_PARTY_PROVIDERS
     await press('return'); // → thirdparty-select, DeepSeek on top
     await press('return'); // DeepSeek → apiKey
@@ -1736,7 +1670,6 @@ describe('the wizard frame keeps its natural height', () => {
     // row the cursor names.
     renderDialog({ availableTerminalHeight: 13 });
     await press('down');
-    await press('down');
     await press('down'); // main: THIRD_PARTY_PROVIDERS
     await press('return'); // → thirdparty-select
     expect(screen.getByText('DeepSeek API Key')).toBeTruthy();
@@ -1763,14 +1696,13 @@ describe('the wizard frame keeps its natural height', () => {
     // wizard stays usable.
     const { rerenderAt } = renderDialog({ availableTerminalHeight: 13 });
     expect(screen.getByText(/Terms of Services/)).toBeTruthy();
-    expect(screen.getByText('Qwen Account with Subscription')).toBeTruthy();
+    expect(screen.getByText('QwenCloud')).toBeTruthy();
 
     rerenderAt(12);
     expect(screen.queryByText(/Terms of Services/)).toBeNull();
-    expect(screen.getByText('Qwen Account with Subscription')).toBeTruthy();
     expect(screen.getByText('QwenCloud')).toBeTruthy();
+    expect(screen.getByText('Alibaba ModelStudio')).toBeTruthy();
 
-    await press('down');
     await press('down');
     await press('down'); // main: THIRD_PARTY_PROVIDERS — a painted row
     await press('return');
@@ -1780,16 +1712,17 @@ describe('the wizard frame keeps its natural height', () => {
   it('sheds the main list margin row before the list loses its last row', async () => {
     // With the rule and terms block shed, the shell's six chrome rows leave
     // a seven-row region a one-row budget — less than an item's three-row
-    // stride — so the list's own margin row sheds too and one provider row
-    // paints: the frame is exactly the region's seven rows, and Enter opens
-    // the painted row.
+    // stride — so the list's own margin row sheds too and no provider row
+    // paints: the frame is exactly the region's seven rows, and Enter on
+    // the view that does open paints nothing either.
     const { onClose } = renderDialog({ availableTerminalHeight: 7 });
     expect(screen.getByText('Connect a Provider')).toBeTruthy();
-    expect(screen.getByText('Qwen Account with Subscription')).toBeTruthy();
-    expect(screen.queryByText('QwenCloud')).toBeNull();
+    expect(screen.getByText('QwenCloud')).toBeTruthy();
+    expect(screen.queryByText('Alibaba ModelStudio')).toBeNull();
 
     await press('return');
-    expect(screen.getByText('Waiting for sign-in…')).toBeTruthy();
+    expect(screen.getByText('QwenCloud · Access Method')).toBeTruthy();
+    expect(screen.queryByText('Token Plan')).toBeNull();
 
     await pressEsc(); // a sub-view's Esc is goBack, unchanged
     expect(screen.getByText('Connect a Provider')).toBeTruthy();
@@ -1830,7 +1763,6 @@ describe('the wizard frame keeps its natural height', () => {
     mocks.state.width = 38;
     renderDialog({ availableTerminalHeight: 14 });
     await press('down');
-    await press('down');
     await press('down'); // main: THIRD_PARTY_PROVIDERS
     await press('return'); // → thirdparty-select
     expect(screen.getByText('Third-party Providers · Provider')).toBeTruthy();
@@ -1843,7 +1775,6 @@ describe('the wizard frame keeps its natural height', () => {
     // region 9 leaves one row — less than a provider row's three — so
     // nothing paints, and the arrows and Enter address nothing.
     const { rerenderAt } = renderDialog({ availableTerminalHeight: 13 });
-    await press('down');
     await press('down');
     await press('down');
     await press('return'); // → thirdparty-select
@@ -1873,7 +1804,6 @@ describe('wire-API step cursor out of one read (#207)', () => {
     await press('down');
     await press('down');
     await press('down');
-    await press('down');
     await press('return'); // main: CUSTOM_PROVIDER → protocol
     await press('return'); // protocol: OpenAI-compatible → API selection
     // ↓ and Enter out of one stdin read. Read from the render that armed the
@@ -1898,193 +1828,5 @@ describe('wire-API step cursor out of one read (#207)', () => {
       expect.objectContaining({ authType: AuthType.USE_OPENAI_RESPONSES }),
       expect.anything(),
     );
-  });
-});
-
-describe('real subscription entry', () => {
-  beforeEach(() => {
-    mocks.state.inputHandlers.length = 0;
-    mocks.state.keyboardHandlers.length = 0;
-    mocks.state.pasteHandlers.length = 0;
-    mocks.state.width = 100;
-    vi.clearAllMocks();
-    vi.stubEnv('DEV', false);
-    delete process.env['DEV'];
-    vi.stubEnv('QWEN_OAUTH_BASE_URL', 'https://auth.qwen.ai');
-    subscription.state = { status: 'waiting' };
-    subscription.canCheckAgain = false;
-    subscription.checking = false;
-    subscription.connecting = false;
-    subscription.connectionError = undefined;
-    subscription.modelSelectionRequired = false;
-  });
-  afterEach(() => vi.unstubAllEnvs());
-
-  it('opens the real view from the menu and exposes the real URL', async () => {
-    const { config } = renderDialog();
-    await press('return');
-    expect(screen.getByText('Waiting for sign-in…')).toBeTruthy();
-    expect(document.body.textContent).toContain(
-      'user_code=REAL-CODE&client=cli',
-    );
-    expect(document.body.textContent).not.toContain('Local Mock');
-    expect(config.refreshAuth).not.toHaveBeenCalled();
-    await pressEsc();
-    expect(screen.getByText('Connect a Provider')).toBeTruthy();
-  });
-
-  it('animates the waiting indicator and stops it when the panel closes', async () => {
-    vi.useFakeTimers();
-    renderDialog();
-    try {
-      await press('return');
-      const waiting = screen.getByText('Waiting for sign-in…');
-      expect(waiting.textContent).toContain(SPINNER_FRAMES[0]);
-      expect(
-        screen
-          .getByText("If the browser didn't open, visit:")
-          .getAttribute('data-fg'),
-      ).toBe(C.dim);
-      expect(
-        screen
-          .getByText('c to copy link · Esc to cancel')
-          .getAttribute('data-fg'),
-      ).toBe(C.dim);
-      act(() => vi.advanceTimersByTime(SPINNER_INTERVAL_MS));
-      expect(waiting.textContent).toContain(SPINNER_FRAMES[1]);
-      await pressEsc();
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      cleanup();
-      vi.useRealTimers();
-    }
-  });
-
-  it('opens plans and switches to the complete provider menu without signing out', async () => {
-    subscription.state = { status: 'purchase-required', plan: 'Free' };
-    renderDialog();
-    await press('return');
-    expect(document.body.textContent).toContain('real@example.com');
-    expect(screen.queryByText('Retry Connection')).toBeNull();
-    expect(screen.queryByText('Sign out')).toBeNull();
-    await press('return');
-    expect(subscription.openPlans).toHaveBeenCalledTimes(1);
-    await press('down');
-    await press('return');
-    expect(subscription.cancel).toHaveBeenCalledOnce();
-    expect(screen.getByText('Connect a Provider')).toBeTruthy();
-    expect(screen.getByText('QwenCloud')).toBeTruthy();
-    expect(screen.getByText('Alibaba ModelStudio')).toBeTruthy();
-    expect(screen.getByText('Third-party Providers')).toBeTruthy();
-    expect(screen.getByText('Custom Provider')).toBeTruthy();
-  });
-
-  it('replaces plans with Retry Connection after the automatic wait', async () => {
-    subscription.state = { status: 'purchase-required', plan: 'Free' };
-    subscription.canCheckAgain = true;
-    renderDialog();
-    await press('return');
-    expect(screen.queryByText('View Plans')).toBeNull();
-    expect(screen.queryByText('Switch Provider')).toBeNull();
-    expect(screen.queryByText('Sign out')).toBeNull();
-    expect(screen.getByText('Retry Connection')).toBeTruthy();
-    await press('return');
-    expect(subscription.checkAgain).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([false, true])(
-    'switches accounts without leaving the subscription view (canCheckAgain=%s)',
-    async (canCheckAgain) => {
-      subscription.state = { status: 'purchase-required', plan: 'Free' };
-      subscription.canCheckAgain = canCheckAgain;
-      renderDialog();
-      await press('return');
-      for (let index = 0; index < (canCheckAgain ? 1 : 2); index++)
-        await press('down');
-      expect(screen.getByText('Use another account')).toBeTruthy();
-      await press('return');
-      expect(subscription.switchAccount).toHaveBeenCalledOnce();
-      expect(subscription.cancel).not.toHaveBeenCalled();
-      expect(screen.queryByText('Connect a Provider')).toBeNull();
-    },
-  );
-
-  it('shows the development entry before configuring OAuth', () => {
-    delete process.env['QWEN_OAUTH_BASE_URL'];
-    renderDialog();
-    expect(screen.getByText('Qwen Account with Subscription')).toBeTruthy();
-  });
-
-  it('waits for activation without a second Connect step', async () => {
-    subscription.state = { status: 'ready', plan: 'Pro' };
-    renderDialog();
-    await press('return');
-    expect(document.body.textContent).toContain(
-      'Loading models from provider…',
-    );
-    expect(screen.queryByText('Connect')).toBeNull();
-    expect(screen.queryByText('Sign out')).toBeNull();
-  });
-
-  it('returns to input for /model instead of offering inline model choices', async () => {
-    subscription.state = { status: 'ready', plan: 'Pro' };
-    subscription.connectionError =
-      'The selected model, removed, is no longer available. Run /model to choose another model.';
-    subscription.modelSelectionRequired = true;
-    const { onClose } = renderDialog();
-    await press('return');
-    expect(document.body.textContent).toContain('Run /model');
-    expect(screen.queryByText('Retry')).toBeNull();
-    await pressEsc();
-    expect(onClose).toHaveBeenCalledOnce();
-    expect(subscription.connect).not.toHaveBeenCalled();
-  });
-
-  it('offers activation Retry only after failure and preserves cancellation', async () => {
-    subscription.state = { status: 'ready', plan: 'Pro' };
-    subscription.connectionError = '';
-    renderDialog();
-    await press('return');
-    expect(screen.getByText('Retry')).toBeTruthy();
-    expect(screen.queryByText('Connect')).toBeNull();
-    expect(screen.queryByText('Loading models from provider…')).toBeNull();
-    await press('return');
-    expect(subscription.connect).toHaveBeenCalledOnce();
-    await pressEsc();
-    expect(screen.getByText('Connect a Provider')).toBeTruthy();
-    expect(screen.queryByText('Retry')).toBeNull();
-  });
-
-  it('returns from the timeout message without signing out', async () => {
-    subscription.state = {
-      status: 'timeout',
-      message: 'Authentication timed out.',
-    };
-    renderDialog();
-    await press('return');
-    expect(screen.getByText('Authentication timed out.')).toBeTruthy();
-    await press('x');
-    expect(screen.getByText('Connect a Provider')).toBeTruthy();
-    expect(subscription.cancel).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps a first membership query failure open and retries the query', async () => {
-    subscription.state = {
-      status: 'query-error',
-      message: 'Subscription query failed.',
-    };
-    renderDialog();
-    await press('return');
-    expect(screen.getByText('Subscription query failed.')).toBeTruthy();
-    expect(
-      screen.queryByText(
-        'Press any key to return to authentication type selection.',
-      ),
-    ).toBeNull();
-    await press('x');
-    expect(screen.getByText('Retry Connection')).toBeTruthy();
-    await press('return');
-    expect(subscription.checkAgain).toHaveBeenCalledTimes(1);
-    expect(subscription.cancel).not.toHaveBeenCalled();
   });
 });

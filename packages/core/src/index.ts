@@ -48,11 +48,9 @@ export {
   type ModelSwitchMetadata,
   MODEL_GENERATION_CONFIG_FIELDS,
   type OnModelChangeCallback,
-  QWEN_OAUTH_MODELS,
   resolveModelConfig,
   type ResolvedModelConfig,
   validateModelConfig,
-  VERTEX_ADC_HINT,
 } from './models/index.js';
 
 // Output formatting
@@ -808,12 +806,6 @@ export * from './agents/btw-session.js';
 export * from './agents/forkedAgent.js';
 export * from './utils/sideQuery.js';
 export * from './utils/output-language-table.js';
-
-// ============================================================================
-// OAuth & Authentication
-// ============================================================================
-
-export * from './qwen/qwenOAuth2.js';
 
 // ============================================================================
 // Message Bus Types

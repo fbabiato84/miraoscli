@@ -24,13 +24,12 @@ import { preloadRuntimeFetchModule } from '../utils/runtimeFetchOptions.js';
 import { buildModelIdContext, resolveModelId } from '../utils/modelId.js';
 import { ToolErrorType } from './tool-error.js';
 import type {
+  DashScopeWebSearchBackendConfig,
   WebSearchBackend,
-  WebSearchBackendConfig,
   WebSearchOutcome,
 } from './web-search-backend.js';
 import { sliceAtCharBoundary } from './web-search-backend.js';
 import { DashScopeWebSearchBackend } from './web-search-dashscope.js';
-import { SubscriptionWebSearchBackend } from './web-search-subscription.js';
 import type {
   ToolCallConfirmationDetails,
   ToolConfirmationOutcome,
@@ -170,7 +169,7 @@ export interface WebSearchSettings {
 }
 
 export type WebSearchGateResult =
-  | { ok: true; backend: WebSearchBackendConfig }
+  | { ok: true; backend: DashScopeWebSearchBackendConfig }
   | {
       ok: false;
       notice: string;
@@ -447,15 +446,6 @@ function resolveAutoBackend(
   config: Config,
   settings: WebSearchSettings | undefined,
 ): WebSearchGateResult {
-  if (config.getCurrentAuthType() === AuthType.QWEN_SUBSCRIPTION) {
-    return {
-      ok: true,
-      backend: {
-        kind: 'qwen-subscription',
-        timeoutMs: resolveWebSearchTimeoutMs(settings?.timeoutMs),
-      },
-    };
-  }
   const unavailable = (reason: string): WebSearchGateResult => {
     gateDebugLogger.debug(`[WebSearch] auto backend unavailable: ${reason}`);
     return {
@@ -846,19 +836,9 @@ function formatLlmContent(
 /** Pick the backend implementation the gate resolved. */
 function createWebSearchBackend(
   config: Config,
-  backend: WebSearchBackendConfig,
+  backend: DashScopeWebSearchBackendConfig,
 ): WebSearchBackend {
-  switch (backend.kind) {
-    case 'dashscope':
-      return new DashScopeWebSearchBackend(config, backend);
-    case 'qwen-subscription':
-      return new SubscriptionWebSearchBackend(config, backend.timeoutMs);
-    default: {
-      // Exhaustive today; keeps a future `kind` from silently doing nothing.
-      const unknown: never = backend;
-      throw new Error(`Unknown web search backend: ${String(unknown)}`);
-    }
-  }
+  return new DashScopeWebSearchBackend(config, backend);
 }
 
 class WebSearchToolInvocation extends BaseToolInvocation<

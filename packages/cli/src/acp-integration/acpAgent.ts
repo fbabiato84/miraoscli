@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { QWEN_SUBSCRIPTION_BASE_URL } from '@qwen-code/qwen-code-core/qwen/oauth-config.js';
-import { isSubscriptionSessionExpired } from '@qwen-code/qwen-code-core/qwen/subscription-errors.js';
-import { filterModelEntriesForDisplay } from '../utils/model-display-order.js';
 import {
   proposeMemoryImport,
   type MemoryImportModelInput,
@@ -27,13 +24,11 @@ import {
   resolveModelProtocol,
   tryResolveModelProtocol,
   resolveModelSelectionAuthType,
-  hasVertexProjectConfigured,
   BTW_MAX_INPUT_LENGTH,
   ALL_PROVIDERS,
   applyProviderInstallPlan,
   buildInstallPlan,
   getModelsForProviderProtocol,
-  clearCachedCredentialFile,
   createDebugLogger,
   generateSessionRecap,
   findProviderById,
@@ -43,8 +38,6 @@ import {
   getDefaultBaseUrlForProtocol,
   getDefaultModelIds,
   getScopedEnvContents,
-  QwenOAuth2Event,
-  qwenOAuth2Events,
   resolveBaseUrl,
   MCP_BUDGET_WARN_FRACTION,
   MCPServerConfig,
@@ -135,7 +128,6 @@ import {
   type Config,
   type ConfigParameters,
   type ConfigInitializeOptions,
-  type DeviceAuthorizationData,
   type DiscoveredMCPPrompt,
   type DiscoveredMCPResource,
   type HookConfig,
@@ -261,7 +253,6 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { LoadedSettings } from '../config/settings.js';
-import { getSubscriptionStartupFallbackModel } from '../config/modelProvidersScope.js';
 import {
   getOperatorTrustSettings,
   loadSettings,
@@ -529,7 +520,6 @@ import {
   REQUESTED_SESSION_ID_META_KEY,
   SESSION_INITIALIZATION_DEADLINE_META_KEY,
   SESSION_INITIALIZATION_TIMEOUT_ERROR_KIND,
-  SESSION_STARTUP_SUBSCRIPTION_MODEL_META_KEY,
   SESSION_MODEL_PERSIST_DEFAULT_META_KEY,
   TODO_STOP_GUARD_QUEUE_RELEASE_METHOD,
   isValidTrustedModelPrompt,
@@ -5801,39 +5791,20 @@ class QwenAgent implements Agent {
       }
     }
 
-    let authUri: string | undefined;
-    const authUriHandler = (deviceAuth: DeviceAuthorizationData) => {
-      authUri = deviceAuth.verification_uri_complete;
-      void this.connection.extNotification('authenticate/update', {
-        _meta: { authUri },
-      });
-    };
-
-    if (method === AuthType.QWEN_OAUTH) {
-      qwenOAuth2Events.once(QwenOAuth2Event.AuthUri, authUriHandler);
-    }
-
-    await clearCachedCredentialFile();
-    try {
-      await this.refreshAuthWithPersistedReasoning(
-        this.config,
-        this.settings,
-        authType,
-      );
-      this.settings.setValue(
-        SettingScope.User,
-        'security.auth.selectedType',
-        method === AuthType.USE_OPENAI &&
-          this.settings.forScope(SettingScope.User).settings.security?.auth
-            ?.selectedType === AuthType.USE_OPENAI_RESPONSES
-          ? AuthType.USE_OPENAI_RESPONSES
-          : method,
-      );
-    } finally {
-      if (method === AuthType.QWEN_OAUTH) {
-        qwenOAuth2Events.off(QwenOAuth2Event.AuthUri, authUriHandler);
-      }
-    }
+    await this.refreshAuthWithPersistedReasoning(
+      this.config,
+      this.settings,
+      authType,
+    );
+    this.settings.setValue(
+      SettingScope.User,
+      'security.auth.selectedType',
+      method === AuthType.USE_OPENAI &&
+        this.settings.forScope(SettingScope.User).settings.security?.auth
+          ?.selectedType === AuthType.USE_OPENAI_RESPONSES
+        ? AuthType.USE_OPENAI_RESPONSES
+        : method,
+    );
   }
 
   private reserveStartingSessionId(sessionId: string): () => void {
@@ -5977,31 +5948,6 @@ class QwenAgent implements Agent {
           const settings = profiler.timeSync('settings_load', () =>
             loadSettingsCached(cwd),
           );
-          const startupModel =
-            params._meta?.[SESSION_STARTUP_SUBSCRIPTION_MODEL_META_KEY];
-          const allowSubscriptionStartupFallback =
-            this.canUseSubscriptionStartupFallback(
-              executionEngine,
-              sessionSource,
-            );
-          const startupSubscriptionModel =
-            typeof startupModel === 'string' &&
-            this.isTrustedManagedParent() &&
-            settings.isTrusted &&
-            allowSubscriptionStartupFallback
-              ? startupModel
-              : undefined;
-          const enforcedAuth = settings.merged.security?.auth?.enforcedType;
-          if (
-            startupSubscriptionModel &&
-            enforcedAuth &&
-            enforcedAuth !== AuthType.QWEN_SUBSCRIPTION
-          ) {
-            throw RequestError.invalidParams(
-              { errorKind: 'auth_type_enforced' },
-              'Authentication is restricted by policy.',
-            );
-          }
           this.settings = settings;
           const deferMcpDiscovery = shouldDeferMcpDiscovery(params);
           const configProviderRevision = this.modelProviderReloadRevision;
@@ -6024,7 +5970,6 @@ class QwenAgent implements Agent {
               undefined,
               undefined,
               executionEngine,
-              startupSubscriptionModel,
             ),
           );
           let session: Session;
@@ -6032,11 +5977,7 @@ class QwenAgent implements Agent {
             initializationDeadline?.signal.throwIfAborted();
             if (!provisionalStandalone) {
               await profiler.time('auth', () =>
-                this.ensureAuthenticated(
-                  config,
-                  settings,
-                  !startupSubscriptionModel && allowSubscriptionStartupFallback,
-                ),
+                this.ensureAuthenticated(config, settings),
               );
               initializationDeadline?.signal.throwIfAborted();
               profiler.timeSync('file_system_setup', () =>
@@ -6397,23 +6338,12 @@ class QwenAgent implements Agent {
         config.suppressRestorableAskUserQuestionPreservation();
       }
       const projection = config.consumeSessionRestoreProjection?.();
-      const allowSubscriptionStartupFallback =
-        this.canUseSubscriptionStartupFallback(executionEngine, sessionSource);
       const restoreModel = () =>
         profiler.time('restore_session_model', () =>
-          this.restoreSessionModel(
-            config,
-            settings,
-            projection,
-            () =>
-              profiler.time('auth', () =>
-                this.ensureAuthenticated(
-                  config,
-                  settings,
-                  allowSubscriptionStartupFallback,
-                ),
-              ),
-            allowSubscriptionStartupFallback,
+          this.restoreSessionModel(config, projection, () =>
+            profiler.time('auth', () =>
+              this.ensureAuthenticated(config, settings),
+            ),
           ),
         );
       const fileDerivedApprovalMode = config.getApprovalMode();
@@ -6846,23 +6776,12 @@ class QwenAgent implements Agent {
         config.suppressRestorableAskUserQuestionPreservation();
       }
       const projection = config.consumeSessionRestoreProjection?.();
-      const allowSubscriptionStartupFallback =
-        this.canUseSubscriptionStartupFallback(executionEngine, sessionSource);
       const restoreModel = () =>
         profiler.time('restore_session_model', () =>
-          this.restoreSessionModel(
-            config,
-            settings,
-            projection,
-            () =>
-              profiler.time('auth', () =>
-                this.ensureAuthenticated(
-                  config,
-                  settings,
-                  allowSubscriptionStartupFallback,
-                ),
-              ),
-            allowSubscriptionStartupFallback,
+          this.restoreSessionModel(config, projection, () =>
+            profiler.time('auth', () =>
+              this.ensureAuthenticated(config, settings),
+            ),
           ),
         );
       const fileDerivedApprovalMode = config.getApprovalMode();
@@ -8769,7 +8688,7 @@ class QwenAgent implements Agent {
         : undefined;
       const providers = new Map<string, ServeWorkspaceProviderStatus>();
 
-      for (const option of filterModelEntriesForDisplay(modelOptions)) {
+      for (const option of modelOptions) {
         const { model, effectiveModelId, modelId } = option;
         const authType = String(model.authType);
         let provider = providers.get(authType);
@@ -8943,25 +8862,6 @@ class QwenAgent implements Agent {
         if (resolvedApiKey) {
           hasToken = true;
         }
-      }
-      // Keyless Vertex: a configured project selects the ADC path, but it is
-      // routing configuration, not evidence that a usable credential exists.
-      // Report indeterminate rather than a confirmed token and let the session
-      // boot settle it.
-      if (
-        !hasToken &&
-        authType === AuthType.USE_VERTEX_AI &&
-        hasVertexProjectConfigured()
-      ) {
-        return this.acpCell('auth', {
-          status: 'unknown',
-          hint: 'Vertex AI is configured for Application Default Credentials; whether they resolve is only known at session start.',
-          detail: {
-            source: String(authType),
-            hasToken: 'unknown' as const,
-            envVarCandidates: apiKeyVars,
-          },
-        });
       }
       // No env-var registration → either OAuth-style auth (qwen-oauth) or
       // a custom provider whose key is sourced from settings rather than
@@ -11204,10 +11104,7 @@ class QwenAgent implements Agent {
         try {
           // A tightening change asks a turn that cannot be revalidated to
           // cancel, so the idle-only reload paths below reach it.
-          if (
-            params['tightening'] === true &&
-            params['subscriptionSignedOut'] !== true
-          ) {
+          if (params['tightening'] === true) {
             await Promise.allSettled(
               [...this.sessions.values()]
                 .filter((session) => !session.isIdle())
@@ -11271,23 +11168,10 @@ class QwenAgent implements Agent {
               );
               break;
             case 'modelProviders': {
-              const result = await this.extMethodInternal(
+              await this.extMethodInternal(
                 SERVE_CONTROL_EXT_METHODS.workspaceModelProvidersReload,
-                {
-                  cwd: changeCwd,
-                  ...(params['subscriptionSignedOut'] === true
-                    ? { subscriptionSignedOut: true }
-                    : {}),
-                },
+                { cwd: changeCwd },
               );
-              if (
-                params['subscriptionSignedOut'] === true &&
-                Number(result['configsFailed']) > 0
-              ) {
-                throw new Error(
-                  'Subscription logout did not reach every connection.',
-                );
-              }
               break;
             }
             case 'skills': {
@@ -15597,72 +15481,10 @@ class QwenAgent implements Agent {
         }
         const reloadRevision = ++this.modelProviderReloadRevision;
         const merged = this.settings.merged;
-        if (params['subscriptionSignedOut'] === true) {
-          let configsRefreshed = 0;
-          let configsFailed = 0;
-          if (
-            this.config.getAuthType() === AuthType.QWEN_SUBSCRIPTION ||
-            merged.security?.auth?.selectedType === AuthType.QWEN_SUBSCRIPTION
-          ) {
-            this.config.setSubscriptionPlan(undefined);
-            configsRefreshed++;
-          }
-          for (const config of this.initializingConfigs) {
-            if (
-              config !== this.config &&
-              config.getAuthType() === AuthType.QWEN_SUBSCRIPTION
-            ) {
-              config.setSubscriptionPlan(undefined);
-              configsRefreshed++;
-            }
-          }
-          for (const session of this.sessions.values()) {
-            if (
-              session.getConfig().getAuthType() !== AuthType.QWEN_SUBSCRIPTION
-            )
-              continue;
-            try {
-              if (!session.isTurnIdle()) await session.cancelPendingPrompt();
-              await session.reloadModelProvidersFromDisk({
-                subscriptionSignedOut: true,
-              });
-              configsRefreshed++;
-            } catch {
-              configsFailed++;
-            }
-          }
-          return { configsRefreshed, configsFailed };
-        }
-        let subscriptionModels: string[] | undefined;
-        if (
-          merged.security?.auth?.selectedType === AuthType.QWEN_SUBSCRIPTION ||
-          [
-            this.config,
-            ...this.initializingConfigs,
-            ...Array.from(this.sessions.values(), (session) =>
-              session.getConfig(),
-            ),
-          ].some(
-            (config) =>
-              config.getModelsConfig().getCurrentAuthType() ===
-              AuthType.QWEN_SUBSCRIPTION,
-          )
-        ) {
-          try {
-            const catalog = await this.config.refreshSubscriptionModels();
-            subscriptionModels = catalog.models;
-          } catch {
-            debugLogger.debug(
-              'Subscription catalog refresh failed during provider reload',
-            );
-          }
-          if (reloadRevision !== this.modelProviderReloadRevision)
-            return { configsRefreshed: 0, configsFailed: 0 };
-        }
-        reloadEnvironment(merged, cwd);
-        const providerProtocol = merged.providerProtocol ?? {};
         let configsRefreshed = 0;
         let configsFailed = 0;
+        reloadEnvironment(merged, cwd);
+        const providerProtocol = merged.providerProtocol ?? {};
 
         const reloadConfig = async (config: Config, id: string) => {
           if (reloadRevision !== this.modelProviderReloadRevision) return;
@@ -15680,27 +15502,6 @@ class QwenAgent implements Agent {
         };
 
         await reloadConfig(this.config, 'bootstrap');
-        if (
-          reloadRevision === this.modelProviderReloadRevision &&
-          merged.security?.auth?.selectedType === AuthType.QWEN_SUBSCRIPTION &&
-          subscriptionModels?.includes(
-            merged.model?.name ?? this.config.getModel(),
-          ) &&
-          (!merged.security.auth.enforcedType ||
-            merged.security.auth.enforcedType === AuthType.QWEN_SUBSCRIPTION)
-        ) {
-          try {
-            this.config.syncModelSelection(
-              AuthType.QWEN_SUBSCRIPTION,
-              merged.model?.name ?? this.config.getModel(),
-              QWEN_SUBSCRIPTION_BASE_URL,
-            );
-            await this.config.refreshAuth(AuthType.QWEN_SUBSCRIPTION);
-          } catch {
-            configsFailed += 1;
-            debugLogger.warn('Subscription bootstrap activation failed');
-          }
-        }
         for (const config of this.initializingConfigs) {
           if (config !== this.config) {
             await reloadConfig(config, `initializing:${config.getSessionId()}`);
@@ -16531,7 +16332,6 @@ class QwenAgent implements Agent {
     chatRecording?: boolean,
     restoreOptions?: SelectiveSessionRestoreOptions,
     executionEngine?: SessionExecutionEngine,
-    startupSubscriptionModel?: string,
   ): Promise<Config> {
     // Transcript replay is the only recording-disabled Config and must remain
     // id-less; it borrows the validated target session context from extMethod.
@@ -16569,7 +16369,6 @@ class QwenAgent implements Agent {
             restoreOptions,
             sessionIdGenerated,
             executionEngine,
-            startupSubscriptionModel,
           );
         }),
       );
@@ -16610,7 +16409,6 @@ class QwenAgent implements Agent {
     restoreOptions?: SelectiveSessionRestoreOptions,
     sessionIdGenerated?: boolean,
     executionEngine?: SessionExecutionEngine,
-    startupSubscriptionModel?: string,
   ): Promise<Config> {
     const provisionalWorkspace = isReservedStandaloneSessionSourceType(
       sessionSource?.sourceType,
@@ -16697,12 +16495,6 @@ class QwenAgent implements Agent {
           };
     const argvForSession = {
       ...this.argv,
-      ...(startupSubscriptionModel
-        ? {
-            authType: AuthType.QWEN_SUBSCRIPTION,
-            model: startupSubscriptionModel,
-          }
-        : {}),
       ...(provisionalWorkspace || agentHostReadOnly
         ? { experimentalLsp: false }
         : {}),
@@ -17166,17 +16958,8 @@ class QwenAgent implements Agent {
     authType: AuthType,
     isInitialAuth?: boolean,
     sessionSelection?: ReasoningSelection,
-    subscriptionFallbackModel?: string,
   ): Promise<void> {
-    if (subscriptionFallbackModel === undefined) {
-      await config.refreshAuth(authType, isInitialAuth);
-    } else {
-      await config.refreshAuth(
-        authType,
-        isInitialAuth,
-        subscriptionFallbackModel,
-      );
-    }
+    await config.refreshAuth(authType, isInitialAuth);
     const selection =
       sessionSelection ??
       parseReasoningSelection(settings.merged.model?.reasoningEffort);
@@ -17214,92 +16997,15 @@ class QwenAgent implements Agent {
 
   private async restoreSessionModel(
     config: Config,
-    settings: LoadedSettings,
     projection: SessionRestoreProjection | undefined,
     authenticate: () => Promise<void>,
-    allowSubscriptionStartupFallback = false,
   ): Promise<void> {
-    const subscriptionFallbackModel = allowSubscriptionStartupFallback
-      ? getSubscriptionStartupFallbackModel(
-          settings,
-          config.getModelsConfig().getCurrentAuthType(),
-          config,
-        )
-      : undefined;
-    try {
-      await restoreSessionModelThenAuthenticate(
-        config,
-        projection,
-        authenticate,
-        subscriptionFallbackModel,
-      );
-    } catch (error) {
-      const auth = settings.merged.security?.auth;
-      if (
-        auth?.selectedType !== AuthType.QWEN_SUBSCRIPTION ||
-        !(error instanceof Error && isSubscriptionSessionExpired(error.cause))
-      ) {
-        throw error;
-      }
-
-      // A signed-out workspace subscription can shadow a saved user model.
-      // Only recover with that selection if the workspace can still use its route.
-      const user = settings.user.settings;
-      const selectedType = user.security?.auth?.selectedType;
-      const modelId = user.model?.name;
-      const baseUrl = user.model?.baseUrl;
-      if (
-        !selectedType ||
-        selectedType === AuthType.QWEN_SUBSCRIPTION ||
-        selectedType === AuthType.QWEN_OAUTH ||
-        !modelId
-      ) {
-        throw error;
-      }
-      try {
-        const authType = resolveModelSelectionAuthType(
-          selectedType,
-          modelId,
-          settings.merged.modelProviders,
-          settings.merged.providerProtocol,
-          baseUrl,
-        );
-        if (
-          (!auth.enforcedType || auth.enforcedType === authType) &&
-          config.getResolvedModelConfig(authType, modelId, baseUrl)
-        ) {
-          await config.switchModel(authType, modelId, { baseUrl });
-          await authenticate();
-          return;
-        }
-      } catch (fallbackError) {
-        debugLogger.debug(
-          'Could not restore with saved user model',
-          fallbackError,
-        );
-      }
-      throw error;
-    }
-  }
-
-  private canUseSubscriptionStartupFallback(
-    executionEngine: SessionExecutionEngine | undefined,
-    sessionSource: SessionSource | undefined,
-  ): boolean {
-    return (
-      executionEngine !== 'managed' &&
-      sessionSource?.sourceType !== AGENT_SESSION_SOURCE_TYPE &&
-      sessionSource?.sourceType !== AGENT_HOST_SESSION_SOURCE_TYPE &&
-      !isReservedStandaloneSessionSourceType(sessionSource?.sourceType) &&
-      this.argv.model === undefined &&
-      this.argv.authType === undefined
-    );
+    await restoreSessionModelThenAuthenticate(config, projection, authenticate);
   }
 
   private async ensureAuthenticated(
     config: Config,
     settings: LoadedSettings,
-    allowSubscriptionStartupFallback = false,
   ): Promise<void> {
     const selectedType = config.getModelsConfig().getCurrentAuthType();
     if (!selectedType) {
@@ -17315,10 +17021,6 @@ class QwenAgent implements Agent {
         settings,
         selectedType,
         true,
-        undefined,
-        allowSubscriptionStartupFallback
-          ? getSubscriptionStartupFallbackModel(settings, selectedType, config)
-          : undefined,
       );
     } catch (e) {
       debugLogger.error(`Authentication failed: ${e}`);
@@ -17997,9 +17699,7 @@ class QwenAgent implements Agent {
         : config.getCurrentModelRegistryBaseUrl?.(),
     );
 
-    const mappedAvailableModels = filterModelEntriesForDisplay(
-      modelOptions,
-    ).map(({ model, modelId }) => ({
+    const mappedAvailableModels = modelOptions.map(({ model, modelId }) => ({
       modelId,
       name: model.label,
       description: model.description ?? null,
@@ -18082,13 +17782,11 @@ class QwenAgent implements Agent {
       options: modeOptions,
     };
 
-    const configModelOptions = filterModelEntriesForDisplay(modelOptions).map(
-      ({ model, modelId }) => ({
-        value: modelId,
-        name: model.label,
-        description: model.description ?? '',
-      }),
-    );
+    const configModelOptions = modelOptions.map(({ model, modelId }) => ({
+      value: modelId,
+      name: model.label,
+      description: model.description ?? '',
+    }));
 
     const modelConfigOption: SessionConfigOption = {
       id: 'model',

@@ -14,10 +14,6 @@ import { workflowsCommand } from '../ui/commands/workflowsCommand.js';
 import { agentsCommand } from '../ui/commands/agentsCommand.js';
 import { arenaCommand } from '../ui/commands/arenaCommand.js';
 import { approvalModeCommand } from '../ui/commands/approvalModeCommand.js';
-import {
-  logoutCommand,
-  upgradeCommand,
-} from '../ui/commands/subscription-commands.js';
 import { authCommand } from '../ui/commands/authCommand.js';
 import { branchCommand } from '../ui/commands/branchCommand.js';
 import { peersCommand } from '../ui/commands/peers-command.js';
@@ -138,8 +134,6 @@ export class BuiltinCommandLoader implements ICommandLoader {
       arenaCommand,
       approvalModeCommand,
       authCommand,
-      upgradeCommand,
-      logoutCommand,
       branchCommand,
       peersCommand,
       btwCommand,

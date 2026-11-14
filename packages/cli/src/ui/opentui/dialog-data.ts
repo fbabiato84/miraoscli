@@ -23,8 +23,6 @@
  */
 
 import { buildModelIdContext } from '@qwen-code/qwen-code-core/utils/modelId.js';
-import { SubscriptionOAuthError } from '@qwen-code/qwen-code-core/qwen/subscription-oauth-client.js';
-import { subscriptionErrorMessage } from '@qwen-code/qwen-code-core/qwen/subscription-errors.js';
 import {
   checkAdvisorModelAvailability,
   isAdvisorModelEligible,
@@ -32,7 +30,6 @@ import {
 import process from 'node:process';
 import { EventEmitter } from 'node:events';
 import {
-  AuthType,
   checkForExtensionUpdate,
   ExtensionUpdateState,
   getMCPServerStatus,
@@ -60,7 +57,8 @@ import type {
   Extension,
   MCPServerConfig,
   ResolvedModelId,
-} from '@qwen-code/qwen-code-core';
+
+  AuthType} from '@qwen-code/qwen-code-core';
 import { SettingScope } from '../../config/settings.js';
 import type { LoadedSettings } from '../../config/settings.js';
 import { loadMcpApprovals } from '../../config/mcpApprovals.js';
@@ -69,10 +67,6 @@ import { switchPrimaryModel } from '../models/primary-model-switch.js';
 import { t } from '../../i18n/index.js';
 import { extensionComponentsSummary } from '../../services/extension-components-summary.js';
 import { publicProviderBaseUrl } from '../../utils/acpModelUtils.js';
-import {
-  filterModelEntriesForDisplay,
-  sortModelEntriesForDisplay,
-} from '../../utils/model-display-order.js';
 import { getErrorMessage } from '../../utils/errors.js';
 import { getToolInvalidReasons, isToolValid } from '../components/mcp/utils.js';
 import { themeManager, AUTO_THEME_NAME } from '../themes/theme-manager.js';
@@ -125,10 +119,8 @@ function advisorSelector(
 export function buildModelEntries(
   config: Config | null | undefined,
   mode: ModelDialogMode,
-  subscriptionSignedIn?: boolean,
 ): OpenTuiModelEntry[] {
   const allModels = config?.getAllConfiguredModels?.() ?? [];
-  const authType = config?.getAuthType?.();
   const entries: OpenTuiModelEntry[] =
     mode === 'advisor'
       ? [
@@ -165,12 +157,6 @@ export function buildModelEntries(
     }
     if (mode !== 'image' && model.imageOnly) continue;
     if (!model.isRuntimeModel) {
-      if (
-        model.authType === AuthType.QWEN_OAUTH &&
-        authType !== AuthType.QWEN_OAUTH
-      ) {
-        continue;
-      }
       if (mode !== 'fast' && mode !== 'advisor' && model.fastOnly) continue;
       if (mode !== 'voice' && model.voiceOnly) continue;
       // ink keeps visionOnly models in vision AND image mode
@@ -188,16 +174,9 @@ export function buildModelEntries(
               model.baseUrl,
             );
     const isRuntime = model.isRuntimeModel ?? false;
-    const isQwenOAuth = model.authType === AuthType.QWEN_OAUTH;
-    // ink folds the runtime / discontinued markers into the row description as
-    // well as its title, so a runtime model with no description of its own still
-    // gets an explanatory line under the title.
     let description = model.description ?? '';
     if (isRuntime) {
       description = description ? `${description} (Runtime)` : 'Runtime model';
-    }
-    if (isQwenOAuth && !isRuntime) {
-      description = t('Discontinued — switch to Coding Plan or API Key');
     }
     entries.push({
       key,
@@ -207,7 +186,6 @@ export function buildModelEntries(
       modelId: model.id,
       ...(description ? { description } : {}),
       isRuntime,
-      isQwenOAuth,
       ...(model.modalities ? { modalities: model.modalities } : {}),
       ...(model.contextWindowSize
         ? { contextWindowSize: model.contextWindowSize }
@@ -217,13 +195,7 @@ export function buildModelEntries(
       model,
     });
   }
-  const visibleEntries = filterModelEntriesForDisplay(
-    entries,
-    subscriptionSignedIn,
-  );
-  return mode === 'primary'
-    ? sortModelEntriesForDisplay(visibleEntries)
-    : visibleEntries;
+  return entries;
 }
 
 /** Parity of ModelDialog's `resolvePersistScope`. */
@@ -585,24 +557,7 @@ export async function applyModelSelection(
     };
   }
 
-  // Primary mode. Block selection of discontinued qwen-oauth models
-  // (only block non-runtime OAuth; runtime OAuth models from existing
-  // cached tokens are still allowed to work until the server rejects them).
-  const isQwenOAuthSelection =
-    selectionKey.startsWith(`${AuthType.QWEN_OAUTH}::`) ||
-    (selectionKey.startsWith('$runtime|') &&
-      selectionKey.split('|')[1] === AuthType.QWEN_OAUTH);
-  const isRuntimeOAuthSelection = selectionKey.startsWith(
-    `$runtime|${AuthType.QWEN_OAUTH}|`,
-  );
-  if (isQwenOAuthSelection && !isRuntimeOAuthSelection) {
-    return {
-      ok: false,
-      error: t(
-        'Qwen OAuth free tier was discontinued on 2026-04-15. Please select a model from another provider or run /auth to switch.',
-      ),
-    };
-  }
+  // Primary mode.
 
   if (!config) {
     return { ok: true };
@@ -630,10 +585,6 @@ export async function applyModelSelection(
   let after: ContentGeneratorConfig | undefined;
   try {
     await switchPrimaryModel(config, settings, selectedAuthType, modelId, {
-      ...(selectedAuthType !== authType &&
-      selectedAuthType === AuthType.QWEN_OAUTH
-        ? { requireCachedCredentials: true }
-        : {}),
       baseUrl: selectedBaseUrl,
     });
     if (!isRuntime) {
@@ -641,9 +592,6 @@ export async function applyModelSelection(
     }
     after = config.getContentGeneratorConfig?.();
   } catch (e) {
-    if (e instanceof SubscriptionOAuthError) {
-      return { ok: false, error: t(subscriptionErrorMessage(e)) };
-    }
     const baseErrorMessage = e instanceof Error ? e.message : String(e);
     // Use parsed modelId for display to avoid showing raw selection key
     // (which contains invisible \0 separator between modelId and baseUrl).
@@ -679,15 +627,13 @@ export async function applyModelSelection(
   return {
     ok: true,
     message:
-      effectiveAuthType === AuthType.QWEN_SUBSCRIPTION
-        ? t('Model: {{model}}', { model: effectiveModelId }) + scopeSuffix
-        : `authType: ${effectiveAuthType ?? `(${t('none')})`}` +
-          `\n` +
-          `Using ${isRuntime ? 'runtime ' : ''}model: ${effectiveModelId}${scopeSuffix}` +
-          `\n` +
-          `Base URL: ${baseUrl}` +
-          `\n` +
-          `API key: ${maskedKey}`,
+      `authType: ${effectiveAuthType ?? `(${t('none')})`}` +
+      `\n` +
+      `Using ${isRuntime ? 'runtime ' : ''}model: ${effectiveModelId}${scopeSuffix}` +
+      `\n` +
+      `Base URL: ${baseUrl}` +
+      `\n` +
+      `API key: ${maskedKey}`,
   };
 }
 

@@ -14,7 +14,6 @@ import {
   type DeviceFlowProvider,
   type DeviceFlowProviderId,
 } from '../auth/device-flow.js';
-import { QwenOAuthDeviceFlowProvider } from '../auth/qwen-device-flow-provider.js';
 
 interface SetupDeviceFlowRegistryDeps {
   app: Application;
@@ -46,9 +45,6 @@ export function createDeviceFlowRegistry(deps: {
   >();
   for (const provider of deps.providers ?? []) {
     deviceFlowProviderMap.set(provider.providerId, provider);
-  }
-  if (!deviceFlowProviderMap.has('qwen-oauth')) {
-    deviceFlowProviderMap.set('qwen-oauth', new QwenOAuthDeviceFlowProvider());
   }
 
   const deviceFlowEventSink: DeviceFlowEventSink = {

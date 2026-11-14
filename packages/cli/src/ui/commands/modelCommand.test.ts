@@ -16,7 +16,6 @@ import {
 } from '@qwen-code/qwen-code-core';
 import type { LoadedSettings } from '../../config/settings.js';
 import { buildAcpModelOptions } from '../../utils/acpModelUtils.js';
-import { SubscriptionOAuthError } from '@qwen-code/qwen-code-core/qwen/subscription-oauth-client.js';
 
 // Helper function to create a mock config
 function createMockConfig(
@@ -3316,82 +3315,5 @@ describe('isPickerOnlyModelInvocation', () => {
     'qwen-max write a one-off prompt',
   ])('treats %j as not picker-only', (args) => {
     expect(isPickerOnlyModelInvocation(args)).toBe(false);
-  });
-});
-
-it('opens subscription model selection after startup failed before generator initialization', async () => {
-  const context = createMockCommandContext({
-    services: {
-      config: {
-        getContentGeneratorConfig: vi.fn().mockReturnValue(null),
-        refreshSubscriptionModels: vi
-          .fn()
-          .mockResolvedValue({ models: ['replacement'], cached: false }),
-        getModel: vi.fn().mockReturnValue('removed'),
-      },
-      settings: {
-        ...createMockSettings(),
-        merged: {
-          security: { auth: { selectedType: AuthType.QWEN_SUBSCRIPTION } },
-        },
-      },
-    },
-  });
-  const result = await modelCommand.action!(context, '');
-  expect(result).toMatchObject({ type: 'dialog', dialog: 'model' });
-});
-
-it('opens the model picker after subscription expiry so other providers remain selectable', async () => {
-  const context = createMockCommandContext({
-    services: {
-      config: {
-        getContentGeneratorConfig: vi.fn().mockReturnValue(null),
-        refreshSubscriptionModels: vi
-          .fn()
-          .mockRejectedValue(new SubscriptionOAuthError('session_changed')),
-      },
-      settings: {
-        ...createMockSettings(),
-        merged: {
-          security: { auth: { selectedType: AuthType.QWEN_SUBSCRIPTION } },
-        },
-      },
-    },
-  });
-  expect(await modelCommand.action!(context, '')).toMatchObject({
-    type: 'dialog',
-    dialog: 'model',
-  });
-});
-
-it('reports catalog permission failures when explicitly selecting a subscription model', async () => {
-  const context = createMockCommandContext({
-    services: {
-      config: {
-        getContentGeneratorConfig: vi.fn().mockReturnValue(null),
-        refreshSubscriptionModels: vi
-          .fn()
-          .mockRejectedValue(
-            new SubscriptionOAuthError(
-              'request_failed',
-              403,
-              'Your account cannot access this model catalog.',
-            ),
-          ),
-      },
-      settings: {
-        ...createMockSettings(),
-        merged: {
-          security: { auth: { selectedType: AuthType.QWEN_SUBSCRIPTION } },
-        },
-      },
-    },
-  });
-  expect(
-    await modelCommand.action!(context, 'replacement(qwen-subscription)'),
-  ).toMatchObject({
-    type: 'message',
-    messageType: 'error',
-    content: 'Your account cannot access this model catalog.',
   });
 });

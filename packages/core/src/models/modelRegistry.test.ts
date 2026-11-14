@@ -4,20 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { readCachedSubscriptionCatalog } from '../qwen/subscription-models.js';
-
-import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   ModelRegistry,
-  QWEN_OAUTH_MODELS,
   modelRegistryKey,
   resolveProviderProtocol,
 } from './modelRegistry.js';
 import { AuthType } from '../core/contentGenerator.js';
-import {
-  QWEN_SUBSCRIPTION_BASE_URL,
-  QWEN_SUBSCRIPTION_MODEL,
-} from '../qwen/oauth-config.js';
 import type {
   ModelConfig,
   ModelProvidersConfig,
@@ -76,22 +69,11 @@ const openaiName = (registry: ModelRegistry, id: string, baseUrl?: string) =>
   registry.getModel(AuthType.USE_OPENAI, id, baseUrl)?.name;
 const idsOf = (registry: ModelRegistry, authType: AuthType) =>
   registry.getModelsForAuthType(authType).map((m) => m.id);
-const expectHardCodedQwenCount = (registry: ModelRegistry) =>
-  expect(registry.getModelsForAuthType(AuthType.QWEN_OAUTH).length).toBe(
-    QWEN_OAUTH_MODELS.length,
-  );
 
 describe('ModelRegistry', () => {
   describe('initialization', () => {
-    it('should always include hard-coded qwen-oauth models', () => {
-      const qwenIds = idsOf(new ModelRegistry(), AuthType.QWEN_OAUTH);
-      expect(qwenIds.length).toBe(QWEN_OAUTH_MODELS.length);
-      expect(qwenIds[0]).toBe('coder-model');
-    });
-
     it('should initialize with empty config', () => {
       const registry = new ModelRegistry();
-      expectHardCodedQwenCount(registry);
       expect(registry.getModelsForAuthType(AuthType.USE_OPENAI).length).toBe(0);
     });
 
@@ -99,22 +81,6 @@ describe('ModelRegistry', () => {
       const openaiModels = openaiListed(gpt4Turbo({ baseUrl: OPENAI_URL }));
       expect(openaiModels.length).toBe(1);
       expect(openaiModels[0].id).toBe('gpt-4-turbo');
-    });
-
-    it('should ignore qwen-oauth models in config (hard-coded)', () => {
-      const registry = new ModelRegistry({
-        'qwen-oauth': [
-          {
-            id: 'custom-qwen',
-            name: 'Custom Qwen',
-          },
-        ],
-      });
-
-      // Should still use hard-coded qwen-oauth models
-      const qwenModels = registry.getModelsForAuthType(AuthType.QWEN_OAUTH);
-      expect(qwenModels.length).toBe(QWEN_OAUTH_MODELS.length);
-      expect(qwenModels.find((m) => m.id === 'custom-qwen')).toBeUndefined();
     });
   });
 
@@ -332,13 +298,6 @@ describe('ModelRegistry', () => {
       ).toBeUndefined();
     });
 
-    it('should return coder-model for qwen-oauth', () => {
-      const defaultModel = new ModelRegistry().getDefaultModelForAuthType(
-        AuthType.QWEN_OAUTH,
-      );
-      expect(defaultModel?.id).toBe('coder-model');
-    });
-
     it('should return first model for other authTypes', () => {
       const registry = openaiRegistry(
         { id: 'gpt-4', name: 'GPT-4' },
@@ -360,12 +319,6 @@ describe('ModelRegistry', () => {
   });
 
   describe('default base URLs', () => {
-    it('should apply default dashscope URL for qwen-oauth', () => {
-      const registry = new ModelRegistry();
-      const model = registry.getModel(AuthType.QWEN_OAUTH, 'coder-model');
-      expect(model?.baseUrl).toBe('DYNAMIC_QWEN_OAUTH_BASE_URL');
-    });
-
     it('should apply default openai URL when not specified', () => {
       const registry = openaiRegistry({ id: 'gpt-4', name: 'GPT-4' });
 
@@ -555,20 +508,6 @@ describe('ModelRegistry', () => {
       expect(registry.getModel(AuthType.USE_OPENAI, 'gpt-3.5')).toBeDefined();
     });
 
-    it('should preserve hard-coded qwen-oauth models after reload', () => {
-      const registry = openaiRegistry({ id: 'gpt-4', name: 'GPT-4' });
-
-      expectHardCodedQwenCount(registry);
-
-      registry.reloadModels(openaiOnly({ id: 'gpt-3.5', name: 'GPT-3.5' }));
-
-      // qwen-oauth models should still exist
-      expectHardCodedQwenCount(registry);
-      expect(
-        registry.getModel(AuthType.QWEN_OAUTH, 'coder-model'),
-      ).toBeDefined();
-    });
-
     it('should clear user-configured models when reload with empty config', () => {
       const registry = new ModelRegistry({
         openai: [{ id: 'gpt-4', name: 'GPT-4' }],
@@ -583,22 +522,6 @@ describe('ModelRegistry', () => {
       // All user-configured models should be cleared
       expect(registry.getModelsForAuthType(AuthType.USE_OPENAI).length).toBe(0);
       expect(registry.getModelsForAuthType(AuthType.USE_GEMINI).length).toBe(0);
-
-      // qwen-oauth models should still exist
-      expectHardCodedQwenCount(registry);
-    });
-
-    it('should ignore qwen-oauth models in reload config', () => {
-      const registry = new ModelRegistry();
-
-      registry.reloadModels({
-        'qwen-oauth': [{ id: 'custom-qwen', name: 'Custom Qwen' }],
-      });
-
-      // qwen-oauth should still use hard-coded models
-      const qwenModels = registry.getModelsForAuthType(AuthType.QWEN_OAUTH);
-      expect(qwenModels.length).toBe(QWEN_OAUTH_MODELS.length);
-      expect(qwenModels.find((m) => m.id === 'custom-qwen')).toBeUndefined();
     });
 
     it('should handle reload with multiple authTypes', () => {
@@ -675,8 +598,6 @@ describe('ModelRegistry', () => {
 
       // All user-configured models should be cleared
       expect(registry.getModelsForAuthType(AuthType.USE_OPENAI).length).toBe(0);
-      // qwen-oauth models should still exist
-      expectHardCodedQwenCount(registry);
     });
 
     it('exposes the applied providers config so hot-reload can diff against registry state', () => {
@@ -1049,21 +970,6 @@ describe('providerProtocol mapping (custom provider ids)', () => {
     expect(registry.getModelsForAuthType(AuthType.USE_OPENAI)).toEqual([]);
   });
 
-  it('silently ignores a custom provider explicitly mapped to qwen-oauth', () => {
-    const registry = new ModelRegistry(
-      {
-        'my-alias': [{ id: 'secret-model' }],
-      } as unknown as ModelProvidersConfig,
-      { 'my-alias': 'qwen-oauth' },
-    );
-
-    // Hard-coded QWEN_OAUTH bucket untouched; the aliased model is not added.
-    expectHardCodedQwenCount(registry);
-    expect(
-      registry.getModel(AuthType.QWEN_OAUTH, 'secret-model'),
-    ).toBeUndefined();
-  });
-
   it('first-wins when two custom providers contribute the same id+baseUrl to one protocol', () => {
     const registry = new ModelRegistry(
       {
@@ -1090,149 +996,3 @@ describe('providerProtocol mapping (custom provider ids)', () => {
     expect(models[0].label).toBe('From A');
   });
 });
-
-describe('Qwen Subscription model registry', () => {
-  afterEach(() => vi.unstubAllEnvs());
-
-  it('keeps server order and resolves subscription model modalities', () => {
-    vi.stubEnv('QWEN_CODE_MODELS_DEV', 'off');
-    const registry = new ModelRegistry();
-    const ids = [
-      'future-model',
-      'deepseek-v4.1-flash',
-      'qwen3.7-plus',
-      'qwen-vl-fixture',
-      'qwen3.8-max',
-    ];
-    registry.setSubscriptionModels(ids);
-    const models = registry.getModelsForAuthType(AuthType.QWEN_SUBSCRIPTION);
-    expect(models.map(({ id }) => id)).toEqual(ids);
-    expect(models.map(({ modalities }) => modalities)).toEqual([
-      {},
-      {},
-      { image: true, video: true },
-      { image: true, video: true },
-      { image: true, video: true },
-    ]);
-  });
-
-  it.each([undefined, 'false', 'true'])(
-    'loads cached models when DEV=%s',
-    (dev) => {
-      vi.stubEnv('DEV', false);
-      if (dev === undefined) delete process.env['DEV'];
-      else process.env['DEV'] = dev;
-      const registry = new ModelRegistry({
-        'qwen-subscription': [{ id: QWEN_SUBSCRIPTION_MODEL }],
-      });
-      expect(registry.getModelsForAuthType(AuthType.QWEN_SUBSCRIPTION)).toEqual(
-        [
-          expect.objectContaining({
-            id: QWEN_SUBSCRIPTION_MODEL,
-            baseUrl: QWEN_SUBSCRIPTION_BASE_URL,
-          }),
-        ],
-      );
-    },
-  );
-
-  it('loads cached models with confirmed modalities and preserves unknown IDs', () => {
-    vi.stubEnv('DEV', false);
-    delete process.env['DEV'];
-    vi.mocked(readCachedSubscriptionCatalog).mockReturnValueOnce({
-      models: ['qwen3.8-max', 'qwen3.8-flash', 'future-model'],
-    });
-    const registry = new ModelRegistry();
-    expect(registry.getModelsForAuthType(AuthType.QWEN_SUBSCRIPTION)).toEqual([
-      expect.objectContaining({
-        id: QWEN_SUBSCRIPTION_MODEL,
-        baseUrl: QWEN_SUBSCRIPTION_BASE_URL,
-        modalities: { image: true, video: true },
-        capabilities: {},
-      }),
-      expect.objectContaining({
-        id: 'qwen3.8-flash',
-        modalities: { image: true, video: true },
-      }),
-      expect.objectContaining({ id: 'future-model', modalities: {} }),
-    ]);
-    expect(
-      registry.getDefaultModelForAuthType(AuthType.QWEN_SUBSCRIPTION)?.id,
-    ).toBe(QWEN_SUBSCRIPTION_MODEL);
-  });
-
-  it('restores gateway metadata from cache without borrowing API provider config', () => {
-    vi.mocked(readCachedSubscriptionCatalog).mockReturnValueOnce({
-      models: ['qwen3.8-max', 'MiniMax-M3'],
-      modelMetadata: [
-        { id: 'qwen3.8-max', contextWindowSize: 262144 },
-        { id: 'MiniMax-M3', modalities: {} },
-      ],
-    });
-    const registry = new ModelRegistry({
-      openai: [
-        {
-          id: 'qwen3.8-max',
-          generationConfig: {
-            modalities: { audio: true },
-            contextWindowSize: 123456,
-          },
-        },
-      ],
-    });
-    expect(registry.getModelsForAuthType(AuthType.QWEN_SUBSCRIPTION)).toEqual([
-      expect.objectContaining({
-        id: 'qwen3.8-max',
-        modalities: { image: true, video: true },
-        contextWindowSize: 262144,
-      }),
-      expect.objectContaining({ id: 'MiniMax-M3', modalities: {} }),
-    ]);
-    expect(registry.getModelsForAuthType(AuthType.USE_OPENAI)).toEqual([
-      expect.objectContaining({
-        id: 'qwen3.8-max',
-        modalities: { audio: true },
-        contextWindowSize: 123456,
-      }),
-    ]);
-  });
-
-  it('ignores direct and aliased configured overrides, including after a reload', () => {
-    vi.stubEnv('DEV', true);
-    process.env['DEV'] = 'true';
-    const malicious = {
-      id: QWEN_SUBSCRIPTION_MODEL,
-      baseUrl: 'https://other.example/v1',
-      envKey: 'OTHER_KEY',
-    };
-    const registry = new ModelRegistry(
-      {
-        'qwen-subscription': [malicious],
-        alias: [malicious, { id: 'unsupported-model' }],
-      },
-      { alias: 'qwen-subscription' },
-    );
-    registry.reloadModels({ 'qwen-subscription': [malicious] });
-    expect(
-      registry.getModelsForAuthType(AuthType.QWEN_SUBSCRIPTION),
-    ).toHaveLength(1);
-    expect(
-      registry.getModel(AuthType.QWEN_SUBSCRIPTION, QWEN_SUBSCRIPTION_MODEL),
-    ).toMatchObject({
-      baseUrl: QWEN_SUBSCRIPTION_BASE_URL,
-      generationConfig: { modalities: { image: true, video: true } },
-    });
-    expect(
-      registry.getModel(AuthType.QWEN_SUBSCRIPTION, QWEN_SUBSCRIPTION_MODEL)
-        ?.envKey,
-    ).toBeUndefined();
-    expect(
-      registry.getModel(AuthType.QWEN_SUBSCRIPTION, 'unsupported-model'),
-    ).toBeUndefined();
-  });
-});
-
-vi.mock('../qwen/subscription-models.js', async (original) => ({
-  ...(await original<typeof import('../qwen/subscription-models.js')>()),
-  readCachedSubscriptionCatalog: vi.fn(() => ({ models: ['qwen3.8-max'] })),
-}));

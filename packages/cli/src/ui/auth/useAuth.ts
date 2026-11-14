@@ -19,12 +19,9 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LoadedSettings } from '../../config/settings.js';
 import { createLoadedSettingsAdapter } from '../../config/loadedSettingsAdapter.js';
-import { useQwenAuth } from '../hooks/useQwenAuth.js';
 import { AuthState, MessageType } from '../types.js';
 import type { HistoryItemWithoutId } from '../types.js';
 import { t } from '../../i18n/index.js';
-import { subscriptionSuccessMessage } from './subscription-success.js';
-import { activateSubscription } from './activate-subscription.js';
 
 /**
  * Normalize model IDs: split by comma, trim, deduplicate, remove empty.
@@ -49,8 +46,6 @@ export function maskApiKey(apiKey: string): string {
   return `${trimmed.slice(0, 3)}...${trimmed.slice(-4)}`;
 }
 
-export type { QwenAuthState } from '../hooks/useQwenAuth.js';
-
 export type AuthUiState = {
   authError: string | null;
   isAuthDialogOpen: boolean;
@@ -62,7 +57,6 @@ export type AuthUiState = {
     message: string;
     detail?: string;
   } | null;
-  qwenAuthState: ReturnType<typeof useQwenAuth>['qwenAuthState'];
 };
 
 export type AuthController = {
@@ -76,10 +70,6 @@ export type AuthController = {
     handleProviderSubmit: (
       providerConfig: ProviderConfig,
       inputs: ProviderSetupInputs,
-    ) => Promise<void>;
-    handleSubscriptionSubmit: (
-      signal: AbortSignal,
-      authorizationUrl?: string,
     ) => Promise<void>;
     openAuthDialog: () => void;
     cancelAuthentication: () => void;
@@ -112,11 +102,6 @@ export const useAuthCommand = (
     message: string;
     detail?: string;
   } | null>(null);
-
-  const { qwenAuthState, cancelQwenAuth } = useQwenAuth(
-    pendingAuthType,
-    isAuthenticating,
-  );
 
   // The dialog also auto-opens at startup when unauthenticated; only a
   // command-opened dialog has an /auth invocation record to pair with.
@@ -258,27 +243,6 @@ export const useAuthCommand = (
     ],
   );
 
-  const handleSubscriptionSubmit = useCallback(
-    async (signal: AbortSignal, authorizationUrl?: string) => {
-      const info = await activateSubscription(settings, config, signal);
-      signal.throwIfAborted();
-      addItem(
-        {
-          type: MessageType.INFO,
-          text: subscriptionSuccessMessage(
-            info,
-            config.getModel(),
-            authorizationUrl,
-          ),
-          presentation: 'subscription-success',
-        },
-        Date.now(),
-      );
-      completeAuthentication();
-    },
-    [settings, config, completeAuthentication, addItem],
-  );
-
   // -- Dialog open / close / cancel ----------------------------------------
 
   const openAuthDialog = useCallback(() => {
@@ -302,9 +266,6 @@ export const useAuthCommand = (
   }, []);
 
   const cancelAuthentication = useCallback(() => {
-    if (isAuthenticating && pendingAuthType === AuthType.QWEN_OAUTH) {
-      cancelQwenAuth();
-    }
     if (isAuthenticating && pendingAuthType) {
       logAuth(config, new AuthEvent(pendingAuthType, 'manual', 'cancelled'));
     }
@@ -312,21 +273,13 @@ export const useAuthCommand = (
     setExternalAuthState(null);
     setIsAuthDialogOpen(true);
     setAuthError(null);
-  }, [isAuthenticating, pendingAuthType, cancelQwenAuth, config]);
+  }, [isAuthenticating, pendingAuthType, config]);
 
   // -- Validate QWEN_DEFAULT_AUTH_TYPE env var on mount --------------------
 
   useEffect(() => {
     const val = process.env['QWEN_DEFAULT_AUTH_TYPE'];
-    const valid = [
-      AuthType.QWEN_OAUTH,
-      AuthType.QWEN_SUBSCRIPTION,
-      AuthType.USE_OPENAI,
-      AuthType.USE_OPENAI_RESPONSES,
-      AuthType.USE_ANTHROPIC,
-      AuthType.USE_GEMINI,
-      AuthType.USE_VERTEX_AI,
-    ];
+    const valid = [AuthType.USE_OPENAI, AuthType.USE_OPENAI_RESPONSES];
     if (val && !valid.includes(val as AuthType)) {
       onAuthError(
         t(
@@ -347,7 +300,6 @@ export const useAuthCommand = (
       isAuthenticating,
       pendingAuthType,
       externalAuthState,
-      qwenAuthState,
     }),
     [
       authError,
@@ -356,7 +308,6 @@ export const useAuthCommand = (
       isAuthenticating,
       pendingAuthType,
       externalAuthState,
-      qwenAuthState,
     ],
   );
 
@@ -366,7 +317,6 @@ export const useAuthCommand = (
       onAuthError,
       closeAuthDialog,
       handleProviderSubmit,
-      handleSubscriptionSubmit,
       openAuthDialog,
       cancelAuthentication,
     }),
@@ -375,7 +325,6 @@ export const useAuthCommand = (
       onAuthError,
       closeAuthDialog,
       handleProviderSubmit,
-      handleSubscriptionSubmit,
       openAuthDialog,
       cancelAuthentication,
     ],
@@ -390,10 +339,8 @@ export const useAuthCommand = (
     isAuthenticating,
     pendingAuthType,
     externalAuthState,
-    qwenAuthState,
     closeAuthDialog,
     handleProviderSubmit,
-    handleSubscriptionSubmit,
     openAuthDialog,
     cancelAuthentication,
     state,

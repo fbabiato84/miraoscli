@@ -19,14 +19,7 @@
  *  - documentation/TOS links render as plain text (no OSC 8 in dialogs).
  */
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Command, keyMatchers } from '../keyMatchers.js';
 import {
   useKeyboard,
@@ -64,7 +57,7 @@ import {
   getRawModelProviders,
 } from '../../config/loadedSettingsAdapter.js';
 import { t } from '../../i18n/index.js';
-import { ICON, SPINNER_FRAMES, SPINNER_INTERVAL_MS } from '../constants.js';
+import { ICON } from '../constants.js';
 import {
   useProviderSetupFlow,
   type ProviderSetupFlow,
@@ -100,11 +93,7 @@ import {
 } from './dialogs-shared.js';
 import { clampDialogHeight } from '../utils/layoutUtils.js';
 import { C } from './theme.js';
-import { copyToClipboard } from '../utils/commandUtils.js';
-import { useSubscription } from '../auth/use-subscription.js';
 import type { HistoryItemInfo } from '../types.js';
-import { subscriptionSuccessMessage } from '../auth/subscription-success.js';
-import { activateSubscription } from '../auth/activate-subscription.js';
 import { useBatchSafeCursor, useBatchSafeState } from './batch-cursor.js';
 
 // ---------------------------------------------------------------------------
@@ -112,7 +101,6 @@ import { useBatchSafeCursor, useBatchSafeState } from './batch-cursor.js';
 // ---------------------------------------------------------------------------
 
 type ViewLevel =
-  | 'subscription'
   | 'main'
   | 'qwencloud-select'
   | 'alibaba-select'
@@ -120,7 +108,6 @@ type ViewLevel =
   | 'provider-setup';
 
 type MainOption =
-  | 'QWEN_SUBSCRIPTION'
   | 'QWENCLOUD'
   | 'ALIBABA_MODELSTUDIO'
   | 'THIRD_PARTY_PROVIDERS'
@@ -128,7 +115,6 @@ type MainOption =
 
 interface RadioItem {
   key: string;
-  isNew?: boolean;
   label: string;
   description?: string;
   disabled?: boolean;
@@ -308,7 +294,6 @@ function RadioList({
     <box flexDirection="column" marginTop={marginTop}>
       {windowed.map((item, windowIndex) => {
         const selected = offset + windowIndex === cursor && !item.disabled;
-        const showNew = item.isNew && runWidth > 4;
         return (
           <box
             key={item.key}
@@ -323,11 +308,7 @@ function RadioList({
               </box>
               <box flexDirection="column" flexGrow={1}>
                 <text fg={item.disabled ? C.dim : selected ? C.green : C.text}>
-                  {truncateToWidth(
-                    item.label,
-                    showNew ? runWidth - 4 : runWidth,
-                  )}
-                  {showNew && <span fg={C.accent}> New</span>}
+                  {truncateToWidth(item.label, runWidth)}
                 </text>
                 {item.description ? (
                   <text fg={C.dim}>
@@ -1300,254 +1281,6 @@ export function OpenTuiAuthDialog(props: AuthDialogProps) {
   return <AuthDialogFlow {...props} config={props.config} />;
 }
 
-function SubscriptionWaitingIndicator() {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(
-      () => setFrame((current) => (current + 1) % SPINNER_FRAMES.length),
-      SPINNER_INTERVAL_MS,
-    );
-    return () => clearInterval(timer);
-  }, []);
-  return (
-    <text>
-      <span fg={C.accent}>{SPINNER_FRAMES[frame]}</span>{' '}
-      {t('Waiting for sign-in…')}
-    </text>
-  );
-}
-
-function SubscriptionView({
-  onBack,
-  onModelSelectionRequired,
-  onSwitchProvider,
-  suppressBrowserLaunch,
-  availableTerminalHeight,
-  onConnect,
-}: {
-  onBack: () => void;
-  onModelSelectionRequired: () => void;
-  onSwitchProvider: () => void;
-  onConnect?: (signal: AbortSignal, authorizationUrl: string) => Promise<void>;
-  suppressBrowserLaunch?: boolean;
-  availableTerminalHeight?: number;
-}) {
-  const flow = useSubscription({
-    suppressBrowserLaunch,
-    onActivate: onConnect,
-  });
-  const { state } = flow;
-  const back = () => {
-    flow.cancel();
-    if (flow.modelSelectionRequired) onModelSelectionRequired();
-    else onBack();
-  };
-  const renderer = useRenderer();
-  useLayoutEffect(() => {
-    const onRaw = (seq: string) => {
-      if (seq !== '\x1b') return false;
-      back();
-      return true;
-    };
-    renderer.addInputHandler(onRaw);
-    return () => renderer.removeInputHandler(onRaw);
-  });
-  const { cursor, cursorRef, setCursor } = useBatchSafeCursor();
-  const actions = [
-    ...(state.status === 'ready' &&
-    flow.connectionError !== undefined &&
-    !flow.modelSelectionRequired
-      ? [
-          {
-            key: 'retry',
-            value: 'retry',
-            label: t('Retry'),
-            disabled: flow.connecting,
-            run: () => void flow.connect(),
-          },
-        ]
-      : []),
-    ...(state.status === 'query-error' ||
-    (state.status === 'purchase-required' && flow.canCheckAgain)
-      ? [
-          {
-            key: 'check',
-            value: 'check',
-            label: t('Retry Connection'),
-            disabled: flow.checking,
-            run: flow.checkAgain,
-          },
-        ]
-      : []),
-    ...(state.status === 'purchase-required' && !flow.canCheckAgain
-      ? [
-          {
-            key: 'plans',
-            value: 'plans',
-            label: t('View Plans'),
-            description: t('Opens the Qwen Code plans page in your browser'),
-            run: flow.openPlans,
-          },
-          {
-            key: 'provider',
-            value: 'provider',
-            label: t('Switch Provider'),
-            description: t('Choose another model provider'),
-            run: () => {
-              flow.cancel();
-              onSwitchProvider();
-            },
-          },
-        ]
-      : []),
-    ...(state.status === 'purchase-required'
-      ? [
-          {
-            key: 'account',
-            value: 'account',
-            label: t('Use another account'),
-            run: () => void flow.switchAccount(),
-          },
-        ]
-      : []),
-  ];
-  const purchase = state.status === 'purchase-required';
-  const lines = purchase
-    ? [
-        t('Signed in as {{email}} (Qwen {{plan}})', {
-          email: flow.email,
-          plan: state.plan,
-        }),
-        t('Qwen Code is included with Qwen Plus and Pro'),
-        t(
-          "You're signed in with a {{plan}} account, which doesn't include Qwen Code. Choose Plus or Pro in your browser; this terminal continues automatically after you subscribe.",
-          { plan: state.plan },
-        ),
-        flow.checking
-          ? t('Checking your subscription…')
-          : (state.message ??
-            t('Waiting for your subscription to become active…')),
-      ]
-    : state.status === 'ready'
-      ? [flow.connectionError ?? t('Loading models from provider…')]
-      : state.status === 'query-error'
-        ? [flow.checking ? t('Checking your subscription…') : state.message]
-        : [];
-  const { width } = useTerminalDimensions();
-  const contentWidth = dialogContentWidth(width);
-  const footer = actions.length
-    ? t('Enter to select, ↑↓ to navigate · Esc to close')
-    : t('Esc to go back');
-  const baseRows =
-    shellBodyChromeRows(t('Qwen Subscription'), contentWidth) +
-    wrappedRows(footer, contentWidth);
-  const regionHeight = clampDialogHeight(availableTerminalHeight);
-  const compact =
-    wizardListWindow(
-      regionHeight,
-      baseRows +
-        lines.reduce((sum, line) => sum + wrappedRows(line, contentWidth), 0),
-      actions.length,
-      2,
-    ) < 1;
-  const visibleLines = compact ? lines.slice(-1) : lines;
-  const menuWindow = wizardListWindow(
-    regionHeight,
-    baseRows +
-      visibleLines.reduce(
-        (sum, line) => sum + wrappedRows(line, contentWidth),
-        0,
-      ),
-    actions.length,
-    2,
-  );
-  const selected = Math.min(cursor, actions.length - 1);
-  const authorizationUrl = flow.deviceAuth?.verification_uri_complete;
-  useKeyboard((key) => {
-    const o = toOriginalKey(key);
-    if (state.status === 'error' || state.status === 'timeout') {
-      back();
-    } else if (o.ctrl && o.name === 'c') {
-      back();
-    } else if (state.status === 'waiting') {
-      if (o.name === 'c' && !o.ctrl && !o.meta && authorizationUrl) {
-        void copyToClipboard(authorizationUrl).catch(() => undefined);
-      }
-    } else if (menuWindow > 0) {
-      if (o.name === 'up' || o.name === 'down') {
-        setCursor(
-          findNextEnabledIndex(
-            actions,
-            Math.min(cursorRef.current, actions.length - 1),
-            o.name,
-          ),
-        );
-      } else if (o.name === 'return') {
-        const action = actions[Math.min(cursorRef.current, actions.length - 1)];
-        if (action && !action.disabled) action.run();
-      }
-    }
-  });
-  return (
-    <Shell title={t('Qwen Subscription')} onClose={back} borderStyle="single">
-      {state.status === 'waiting' ? (
-        <box flexDirection="column" marginTop={1}>
-          <text>
-            {t(
-              'Opening chat.qwen.ai in your browser… Sign in there to connect Qwen Code.',
-            )}
-          </text>
-          {authorizationUrl && (
-            <>
-              <text fg={C.dim}>{t("If the browser didn't open, visit:")}</text>
-              <text fg={C.purple} attributes={8}>
-                {authorizationUrl}
-              </text>
-            </>
-          )}
-          <box marginTop={1}>
-            <SubscriptionWaitingIndicator />
-          </box>
-          <box marginTop={1}>
-            <text fg={C.dim}>{t('c to copy link · Esc to cancel')}</text>
-          </box>
-        </box>
-      ) : state.status === 'error' || state.status === 'timeout' ? (
-        <box flexDirection="column" gap={1}>
-          <text fg={C.red}>
-            {t(
-              state.status === 'error'
-                ? 'Qwen OAuth Authentication Error'
-                : 'Qwen OAuth Authentication Timeout',
-            )}
-          </text>
-          <text>{state.message}</text>
-          <text>
-            {t('Press any key to return to authentication type selection.')}
-          </text>
-        </box>
-      ) : (
-        <box flexDirection="column">
-          {visibleLines.map((line, i) => (
-            <text key={i}>{line}</text>
-          ))}
-          <RadioList
-            items={actions}
-            cursor={selected}
-            offset={getSelectionScrollOffset(
-              selected,
-              actions.length,
-              menuWindow,
-            )}
-            maxItems={menuWindow}
-          />
-          <text>{footer}</text>
-        </box>
-      )}
-    </Shell>
-  );
-}
-
 function AuthDialogFlow({
   config,
   settings,
@@ -1560,18 +1293,7 @@ function AuthDialogFlow({
   const [errorMessage, setErrorMessage] = useState<string | null>(
     initialError ?? null,
   );
-  const mainItems: RadioItem[] = [
-    {
-      key: 'QWEN_SUBSCRIPTION',
-      label: t('Qwen Account with Subscription'),
-      isNew: true,
-      description: t(
-        'Unlock Qwen Code + Agent with Plus/Pro Plan at chat.qwen.ai',
-      ),
-      value: 'QWEN_SUBSCRIPTION',
-    },
-    ...MAIN_ITEMS,
-  ];
+  const mainItems: RadioItem[] = MAIN_ITEMS;
 
   // Every text field latches itself shut on the Enter that submits it, and only
   // a mount-key change clears that latch. On the last step the submit is async,
@@ -1759,9 +1481,6 @@ function AuthDialogFlow({
     (value: MainOption) => {
       clearErrors();
       switch (value) {
-        case 'QWEN_SUBSCRIPTION':
-          pushView('subscription');
-          break;
         case 'QWENCLOUD':
           pushView('qwencloud-select');
           break;
@@ -1938,7 +1657,6 @@ function AuthDialogFlow({
   useLayoutEffect(() => {
     const onRaw = (seq: string): boolean => {
       if (seq !== '\x1b') return false;
-      if (viewLevel === 'subscription') return false;
       if (viewLevel !== 'main') {
         goBack();
         return true;
@@ -1991,35 +1709,6 @@ function AuthDialogFlow({
   ]);
 
   // -- Render -------------------------------------------------------------------
-
-  if (viewLevel === 'subscription') {
-    return (
-      <SubscriptionView
-        availableTerminalHeight={availableTerminalHeight}
-        suppressBrowserLaunch={config.isBrowserLaunchSuppressed()}
-        onBack={goBack}
-        onModelSelectionRequired={onClose}
-        onConnect={async (signal, authorizationUrl) => {
-          const info = await activateSubscription(settings, config, signal);
-          signal.throwIfAborted();
-          notify?.(
-            subscriptionSuccessMessage(
-              info,
-              config.getModel(),
-              authorizationUrl,
-            ),
-            'subscription-success',
-          );
-          onClose();
-        }}
-        onSwitchProvider={() => {
-          clearErrors();
-          setViewStack([]);
-          setViewLevel('main');
-        }}
-      />
-    );
-  }
 
   return (
     <Shell title={viewTitle} onClose={onClose} borderStyle="single">

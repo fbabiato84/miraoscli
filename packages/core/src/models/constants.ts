@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { DEFAULT_QWEN_MODEL, MAINLINE_CODER_MODEL } from '../config/models.js';
-import { QWEN_SUBSCRIPTION_MODEL } from '../qwen/oauth-config.js';
-
-import type { ModelConfig } from './types.js';
+import { MAINLINE_CODER_MODEL } from '../config/models.js';
 
 type AuthType = import('../core/contentGenerator.js').AuthType;
 type ContentGeneratorConfig =
@@ -95,57 +92,20 @@ export const AUTH_ENV_MAPPINGS = {
     baseUrl: ['OPENAI_BASE_URL'],
     model: ['OPENAI_MODEL'],
   },
-  anthropic: {
-    apiKey: ['ANTHROPIC_API_KEY'],
-    baseUrl: ['ANTHROPIC_BASE_URL'],
-    model: ['ANTHROPIC_MODEL'],
-  },
-  gemini: {
-    apiKey: ['GEMINI_API_KEY'],
-    baseUrl: [],
-    model: ['GEMINI_MODEL'],
-  },
-  'vertex-ai': {
-    apiKey: ['GOOGLE_API_KEY'],
-    baseUrl: [],
-    model: ['GOOGLE_MODEL'],
-  },
-  'qwen-oauth': {
-    apiKey: [],
-    baseUrl: [],
-    model: [],
-  },
-  'qwen-subscription': {
-    apiKey: [],
-    baseUrl: [],
-    model: [],
-  },
-} as const satisfies Record<AuthType, AuthEnvMapping>;
+} as const satisfies Partial<Record<AuthType, AuthEnvMapping>>;
+
+const NO_ENV_MAPPINGS: AuthEnvMapping = { apiKey: [], baseUrl: [], model: [] };
+
+export function getAuthEnvMappings(
+  authType: AuthType | undefined,
+): AuthEnvMapping {
+  if (!authType) return NO_ENV_MAPPINGS;
+  return (
+    AUTH_ENV_MAPPINGS[authType as keyof typeof AUTH_ENV_MAPPINGS] ??
+    NO_ENV_MAPPINGS
+  );
+}
 
 export const DEFAULT_MODELS = {
   openai: MAINLINE_CODER_MODEL,
-  'qwen-oauth': DEFAULT_QWEN_MODEL,
-  'qwen-subscription': QWEN_SUBSCRIPTION_MODEL,
 } as Partial<Record<AuthType, string>>;
-
-/**
- * Hard-coded Qwen OAuth models that are always available.
- * These cannot be overridden by user configuration.
- */
-export const QWEN_OAUTH_MODELS: ModelConfig[] = [
-  {
-    id: 'coder-model',
-    name: 'coder-model',
-    description:
-      'Qwen 3.7 Max — efficient hybrid model with leading coding performance',
-    capabilities: { vision: true },
-  },
-];
-
-/**
- * Derive allowed models from QWEN_OAUTH_MODELS for authorization.
- * This ensures single source of truth (SSOT).
- */
-export const QWEN_OAUTH_ALLOWED_MODELS = QWEN_OAUTH_MODELS.map(
-  (model) => model.id,
-) as readonly string[];

@@ -8,11 +8,6 @@ import { AuthType } from '../core/contentGenerator.js';
 import { defaultModalities } from '../core/modalityDefaults.js';
 import { tokenLimit } from '../core/tokenLimits.js';
 import { DEFAULT_OPENAI_BASE_URL } from '../core/openaiContentGenerator/constants.js';
-import { QWEN_SUBSCRIPTION_BASE_URL } from '../qwen/oauth-config.js';
-import {
-  readCachedSubscriptionCatalog,
-  type SubscriptionModelMetadata,
-} from '../qwen/subscription-models.js';
 import {
   type ModelConfig,
   type ModelProvidersConfig,
@@ -20,13 +15,9 @@ import {
   type ResolvedModelConfig,
   type AvailableModel,
 } from './types.js';
-import { DEFAULT_QWEN_MODEL } from '../config/models.js';
-import { QWEN_OAUTH_MODELS } from './constants.js';
 import { createDebugLogger } from '../utils/debugLogger.js';
 
 const debugLogger = createDebugLogger('MODEL_REGISTRY');
-
-export { QWEN_OAUTH_MODELS } from './constants.js';
 
 /**
  * Validates if a string key is a valid AuthType enum value.
@@ -182,6 +173,11 @@ export function resolveModelSelectionAuthType(
   return (exact ?? preferred(candidates))?.authType ?? authType;
 }
 
+/**
+ * MiniMax-M3 accepts images and video, but providers commonly declare only
+ * `image`. Promote it to the canonical pair so the vision/video gates agree
+ * regardless of what the provider sent.
+ */
 function shouldUseCanonicalModalities(modelId: string): boolean {
   return /^minimax-m3/i.test(modelId.trim().toLowerCase());
 }
@@ -210,8 +206,6 @@ export class ModelRegistry {
 
   private getDefaultBaseUrl(authType: AuthType): string {
     switch (authType) {
-      case AuthType.QWEN_OAUTH:
-        return 'DYNAMIC_QWEN_OAUTH_BASE_URL';
       case AuthType.USE_OPENAI:
         return DEFAULT_OPENAI_BASE_URL;
       default:
@@ -228,12 +222,6 @@ export class ModelRegistry {
     this.providerProtocolConfig = providerProtocolConfig ?? {};
     this.modelProvidersConfig = modelProvidersConfig;
 
-    // Always register qwen-oauth models (hard-coded, cannot be overridden)
-    this.registerAuthTypeModels(AuthType.QWEN_OAUTH, QWEN_OAUTH_MODELS);
-    const { models, modelMetadata } = readCachedSubscriptionCatalog();
-    this.setSubscriptionModels(models, modelMetadata);
-
-    // Register user-configured models for other providers
     this.registerProvidersConfig(modelProvidersConfig);
   }
 
@@ -433,15 +421,11 @@ export class ModelRegistry {
 
   /**
    * Get default model for an authType.
-   * For qwen-oauth, returns the coder model.
-   * For others, returns the first configured primary-capable model.
+   * Returns the first configured primary-capable model.
    */
   getDefaultModelForAuthType(
     authType: AuthType,
   ): ResolvedModelConfig | undefined {
-    if (authType === AuthType.QWEN_OAUTH) {
-      return this.getModel(authType, DEFAULT_QWEN_MODEL);
-    }
     const models = this.modelsByAuthType.get(authType);
     if (!models || models.size === 0) return undefined;
     return Array.from(models.values()).find(
@@ -465,8 +449,7 @@ export class ModelRegistry {
     // the parent session's modalities instead of the agent's own.
     if (
       generationConfig.modalities === undefined ||
-      (authType !== AuthType.QWEN_SUBSCRIPTION &&
-        shouldUseCanonicalModalities(config.id))
+      shouldUseCanonicalModalities(config.id)
     ) {
       generationConfig.modalities = defaultModalities(config.id);
     }
@@ -505,34 +488,9 @@ export class ModelRegistry {
     }
   }
 
-  setSubscriptionModels(
-    ids: string[],
-    modelMetadata?: SubscriptionModelMetadata[],
-  ): void {
-    const metadataById = new Map(
-      modelMetadata?.map((entry) => [entry.id, entry]),
-    );
-    this.modelsByAuthType.delete(AuthType.QWEN_SUBSCRIPTION);
-    this.registerAuthTypeModels(
-      AuthType.QWEN_SUBSCRIPTION,
-      ids.map((id) => {
-        const metadata = metadataById.get(id);
-        return {
-          id,
-          baseUrl: QWEN_SUBSCRIPTION_BASE_URL,
-          generationConfig: {
-            modalities: metadata?.modalities,
-            contextWindowSize: metadata?.contextWindowSize ?? tokenLimit(id),
-          },
-        };
-      }),
-    );
-  }
-
   /**
    * Reload models from updated configuration.
    * Clears existing user-configured models and re-registers from new config.
-   * Preserves hard-coded qwen-oauth models.
    *
    * @param providerProtocolConfig - Updated provider->protocol map. `undefined`
    *   PRESERVES the existing map (so a reload carrying only modelProviders does

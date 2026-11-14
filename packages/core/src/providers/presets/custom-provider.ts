@@ -103,6 +103,10 @@ export const customProvider: ProviderConfig = {
   baseUrl: undefined,
   envKey: generateCustomEnvKey,
   models: undefined,
+  // A custom provider ships no static catalog, so the served model list is
+  // the only source of ids. The wizard still accepts typed ids when `/models`
+  // is unavailable (see DiscoveringModelIdsStep).
+  supportsModelDiscovery: true,
   modelNamePrefix: '',
   showAdvancedConfig: true,
   // Detect existing custom entries by our env-key namespace for UI/ACP flows,

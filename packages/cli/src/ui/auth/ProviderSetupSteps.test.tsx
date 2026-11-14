@@ -902,6 +902,61 @@ describe('ProviderSetupSteps', () => {
     }
   });
 
+  it('discovers the served list for a provider without a static catalog', async () => {
+    discoverProviderModelsMock.mockResolvedValue([
+      { id: 'served-alpha' },
+      { id: 'served-beta' },
+    ]);
+    const submitModelIds = vi.fn();
+    const flow = createModelIdsFlow({ modelIds: '', submitModelIds });
+    // The custom provider ships no models, so discovery is its only catalog.
+    flow.state.provider = customProvider;
+    enableDiscovery(flow);
+
+    const { lastFrame, unmount } = renderWithProviders(
+      <ProviderSetupSteps flow={flow} />,
+    );
+    try {
+      await act(async () => {});
+      expect(discoverProviderModelsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          baseUrl: 'https://example.com/v1',
+          apiKey: 'secret-key',
+          staticModels: [],
+        }),
+      );
+      expect(lastFrame()).toContain('served-alpha');
+      expect(lastFrame()).toContain('served-beta');
+    } finally {
+      unmount();
+    }
+  });
+
+  it('still accepts typed ids when the provider serves no catalog', async () => {
+    discoverProviderModelsMock.mockResolvedValue(null);
+    const submitModelIds = vi.fn();
+    const flow = createModelIdsFlow({
+      modelIds: 'typed-model',
+      submitModelIds,
+    });
+    flow.state.provider = customProvider;
+    enableDiscovery(flow);
+
+    const { lastFrame, unmount } = renderWithProviders(
+      <ProviderSetupSteps flow={flow} />,
+    );
+    try {
+      await act(async () => {});
+      expect(lastFrame()).toContain('Enter model IDs separated by commas.');
+      // The saved ids stay in the input, so the step is still usable.
+      expect(lastFrame()).toContain('typed-model');
+      pressKey('return', '\r');
+      expect(submitModelIds).toHaveBeenCalled();
+    } finally {
+      unmount();
+    }
+  });
+
   it.each([
     {
       provider: qwencloudStandardProvider,

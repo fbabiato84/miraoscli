@@ -958,6 +958,8 @@ export function ProviderSetupSteps({
       return <ApiKeyStep config={provider} flow={flow} />;
 
     case 'models':
+      // Discovery is the only catalog a provider without static models has.
+      // Both paths fall back to typed ids when `/models` answers nothing.
       if (provider.supportsModelDiscovery) {
         return <DiscoveringModelIdsStep config={provider} flow={flow} />;
       }

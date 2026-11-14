@@ -90,7 +90,6 @@ import {
 } from '../utils/textUtils.js';
 import { isPickerOnlyModelInvocation } from '../commands/modelCommand.js';
 import { quitCommand } from '../commands/quitCommand.js';
-import { useSubscriptionCommandVisibility } from './use-subscription-command-visibility.js';
 import {
   type ExtensionUpdateAction,
   type ExtensionUpdateStatus,
@@ -268,7 +267,6 @@ export const useSlashCommandProcessor = (
 
   const { stats: sessionStats, startNewSession } = useSessionStats();
   const [commands, setCommands] = useState<readonly SlashCommand[]>([]);
-  const availableCommands = useSubscriptionCommandVisibility(commands, config);
   const [recentCommands, setRecentCommands] = useState<
     ReadonlyMap<string, RecentSlashCommand>
   >(new Map());
@@ -923,7 +921,7 @@ export const useSlashCommandProcessor = (
         commandToExecute,
         args,
         canonicalPath: resolvedCommandPath,
-      } = parseSlashCommand(trimmed, availableCommands);
+      } = parseSlashCommand(trimmed, commands);
 
       if (!commandToExecute) {
         const fallback = parseSlashCommand(trimmed, [quitCommand]);
@@ -1058,10 +1056,7 @@ export const useSlashCommandProcessor = (
         }
         if (abortController.signal.aborted) return { type: 'handled' };
         // Handle stacked skill invocations (e.g. /feat-dev /e2e-testing implement X)
-        const stackedResult = parseStackedSlashCommands(
-          trimmed,
-          availableCommands,
-        );
+        const stackedResult = parseStackedSlashCommands(trimmed, commands);
         if (stackedResult.skills.length >= 2) {
           const combinedContent: PartListUnion[] = [];
           let firstModelOverride: string | undefined;
@@ -1777,7 +1772,7 @@ export const useSlashCommandProcessor = (
       settings,
       addItem,
       actions,
-      availableCommands,
+      commands,
       commandContext,
       addMessage,
       setShellConfirmationRequest,
@@ -1792,7 +1787,7 @@ export const useSlashCommandProcessor = (
 
   return {
     handleSlashCommand,
-    slashCommands: availableCommands,
+    slashCommands: commands,
     recentSlashCommands: recentCommands,
     pendingHistoryItems,
     btwItem,
