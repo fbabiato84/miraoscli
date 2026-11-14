@@ -176,7 +176,7 @@ class SkippedConnectionError extends Error {
  * as "your running session's MCP tools are back" (issue #9944).
  */
 const SESSION_SCOPE_NOTE =
-  'Note: this command reconnects in a separate process; it cannot refresh the MCP tools of an already-running Qwen Code session. Restart that session if its tools remain unavailable.';
+  'Note: this command reconnects in a separate process; it cannot refresh the MCP tools of an already-running MiraOS session. Restart that session if its tools remain unavailable.';
 
 function createReconnectError(
   message: string,

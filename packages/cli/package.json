@@ -1,8 +1,8 @@
 {
   "name": "@qwen-code/qwen-code",
   "private": true,
-  "version": "0.27.2",
-  "description": "Qwen Code",
+  "version": "0.0.1-beta",
+  "description": "MiraOS",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/QwenLM/qwen-code.git"
@@ -11,7 +11,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "qwen": "dist/index.js"
+    "miraos": "dist/index.js"
   },
   "exports": {
     ".": {
@@ -38,7 +38,7 @@
     "dist"
   ],
   "config": {
-    "sandboxImageUri": "ghcr.io/qwenlm/qwen-code:0.27.2"
+    "sandboxImageUri": "ghcr.io/qwenlm/qwen-code:0.0.1-beta"
   },
   "dependencies": {
     "@a2a-js/sdk": "^1.1.0",

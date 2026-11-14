@@ -81,6 +81,10 @@ execSync('node --import tsx/esm scripts/generate-settings-schema.ts', {
   cwd: root,
 });
 
+// Build the vendored REA runtime when this checkout carries one, so the
+// bundled `rea` MCP server resolves after a source install. No-op elsewhere.
+execSync('node scripts/build-rea.js', { stdio: 'inherit', cwd: root });
+
 // also build container image if sandboxing is enabled
 // skip (-s) npm install + build since we did that above
 try {

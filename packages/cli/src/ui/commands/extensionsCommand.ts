@@ -371,6 +371,7 @@ const installCommand: SlashCommand = {
 
 export const extensionsCommand: SlashCommand = {
   name: 'extensions',
+  altNames: ['plugins', 'plugin'],
   get description() {
     return t('Manage extensions');
   },

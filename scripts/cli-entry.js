@@ -347,8 +347,8 @@ if (isInProcessFastPath()) {
   const findLauncher = () => {
     const launcherNames =
       process.platform === 'win32'
-        ? ['qwen.cmd', 'qwen.exe', 'qwen']
-        : ['qwen'];
+        ? ['miraos.cmd', 'miraos.exe', 'miraos', 'qwen.cmd', 'qwen.exe', 'qwen']
+        : ['miraos', 'qwen'];
     const entryRootLength = parse(entryPath).root.length;
     const launcherFromEnv = standaloneShim;
     const launcherCandidates = process.env['PATH']

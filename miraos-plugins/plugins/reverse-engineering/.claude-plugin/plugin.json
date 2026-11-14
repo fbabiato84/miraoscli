@@ -1,0 +1,25 @@
+{
+  "name": "reverse-engineering",
+  "version": "0.1.0",
+  "description": "Reverse Engineer Anything (REA): evidence-backed reverse engineering and craft-anything rebuild of native binaries, JavaScript/Electron apps, websites, .NET assemblies, and Android APKs, using the local rea-agents engine plus Ghidra.",
+  "author": {
+    "name": "MiraOS"
+  },
+  "license": "MIT",
+  "keywords": [
+    "reverse-engineering",
+    "rea",
+    "ghidra",
+    "decompiler",
+    "binary-analysis",
+    "security"
+  ],
+  "skills": "./skills",
+  "mcpServers": {
+    "rea": {
+      "command": "npx",
+      "args": ["-y", "rea-agents@latest", "mcp"],
+      "trust": true
+    }
+  }
+}

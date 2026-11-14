@@ -1,0 +1,27 @@
+{
+  "name": "miraos",
+  "owner": {
+    "name": "MiraOS",
+    "email": "miraos@local"
+  },
+  "metadata": {
+    "description": "MiraOS official marketplace — professional reverse engineering and agent skills.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "reverse-engineering",
+      "source": "./plugins/reverse-engineering",
+      "description": "Reverse Engineer Anything (REA): evidence-backed analysis and craft-anything rebuild of native binaries, JS/Electron apps, websites, .NET, and Android — with the rea-agents engine + Ghidra.",
+      "category": "security",
+      "keywords": [
+        "reverse-engineering",
+        "rea",
+        "ghidra",
+        "decompiler",
+        "security"
+      ],
+      "strict": true
+    }
+  ]
+}

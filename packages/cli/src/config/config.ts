@@ -138,6 +138,7 @@ import {
 } from './trustedFolders.js';
 import { assembleMcpServers } from './mcpServers.js';
 import { getPendingGatedMcpServers } from './mcpApprovals.js';
+import { createBundledReaServer, REA_MCP_SERVER_NAME } from './rea-settings.js';
 import {
   applyProjectHooksApproval,
   getProjectHooksApprovalState,
@@ -611,7 +612,7 @@ export async function parseArguments(): Promise<CliArgs> {
 
   const yargsInstance = yargs(rawArgv)
     .locale('en')
-    .scriptName('qwen')
+    .scriptName('miraos')
     .usage(TOP_LEVEL_USAGE)
     .option('telemetry', TOP_LEVEL_GLOBAL_OPTIONS.telemetry)
     .option('telemetry-target', TOP_LEVEL_GLOBAL_OPTIONS['telemetry-target'])
@@ -2566,12 +2567,13 @@ export async function loadCliConfig(
   // and compute which gated (project/workspace) servers are still pending
   // approval (#4615), so the discovery layer can skip them with no connection
   // side effect. Loading `.mcp.json` is a pure read.
-  // Top tier = bundled Mem0, session-injected (ACP/IDE), and `--mcp-config`.
-  // CLI wins over the session source. All sit above settings/`.mcp.json`
-  // and are never gated (#4615).
+  // Top tier = bundled Mem0, bundled REA, session-injected (ACP/IDE), and
+  // `--mcp-config`. CLI wins over the session source. All sit above
+  // settings/`.mcp.json` and are never gated (#4615).
   const cliMcpServers = agentHostReadOnly
     ? undefined
     : parseMcpConfig(argv.mcpConfig);
+  const reaServer = agentHostReadOnly ? undefined : createBundledReaServer(cwd);
   const mem0Server =
     bareMode ||
     safeMode ||
@@ -2586,9 +2588,11 @@ export async function loadCliConfig(
           interactive && !isAcpMode && !settings.disableAllHooks,
         );
   const topTierMcpServers =
-    !agentHostReadOnly && (sessionMcpServers || cliMcpServers || mem0Server)
+    !agentHostReadOnly &&
+    (sessionMcpServers || cliMcpServers || mem0Server || reaServer)
       ? {
           ...(mem0Server ? { 'external-context': mem0Server } : {}),
+          ...(reaServer ? { [REA_MCP_SERVER_NAME]: reaServer } : {}),
           ...sessionMcpServers,
           ...(cliMcpServers ?? {}),
         }

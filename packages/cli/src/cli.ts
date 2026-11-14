@@ -66,8 +66,8 @@ export const TOP_LEVEL_COMMANDS = [
   ],
   ['board <command>', 'Share work with other agents through a board'],
   ['channel <command>', 'Manage messaging channels (Telegram, Discord, etc.)'],
-  ['extensions <command>', 'Manage Qwen Code extensions.'],
-  ['hooks', 'Manage Qwen Code hooks (use /hooks in interactive mode).'],
+  ['extensions <command>', 'Manage MiraOS extensions.'],
+  ['hooks', 'Manage MiraOS hooks (use /hooks in interactive mode).'],
   ['mcp', 'Manage MCP servers'],
   ['memory', 'Preview and import external memories'],
   [
@@ -80,11 +80,11 @@ export const TOP_LEVEL_COMMANDS = [
   ],
   [
     'serve',
-    'Run Qwen Code as a local HTTP daemon (Stage 1 experimental: --http-bridge)',
+    'Run MiraOS as a local HTTP daemon (Stage 1 experimental: --http-bridge)',
   ],
-  ['daemon <command>', 'Inspect and control local qwen serve daemons'],
-  ['sessions <command>', 'Manage Qwen Code sessions'],
-  ['update', 'Check for Qwen Code updates and install if available'],
+  ['daemon <command>', 'Inspect and control local miraos serve daemons'],
+  ['sessions <command>', 'Manage MiraOS sessions'],
+  ['update', 'Check for MiraOS updates and install if available'],
 ] as const;
 
 export const MCP_COMMANDS = [
@@ -286,7 +286,7 @@ async function buildTopLevelHelpParser() {
   const { default: yargs } = await import('yargs');
   const parser = yargs([])
     .locale('en')
-    .scriptName('qwen')
+    .scriptName('miraos')
     .usage(TOP_LEVEL_USAGE)
     .version(process.env['CLI_VERSION'] || 'unknown')
     .alias('v', 'version')
@@ -476,7 +476,7 @@ async function runMcpFastPath(rawArgv: readonly string[]): Promise<void> {
   ]);
 
   const parser = yargsInstance([])
-    .scriptName('qwen')
+    .scriptName('miraos')
     .command(mcpCommand)
     .version(false)
     .help()
@@ -513,7 +513,7 @@ async function runMemoryFastPath(rawArgv: readonly string[]): Promise<void> {
   ]);
 
   const parser = yargsInstance([])
-    .scriptName('qwen')
+    .scriptName('miraos')
     .command(memoryCommand)
     .version(false)
     .help()
@@ -858,7 +858,7 @@ export async function runCliEntryPoint(
   ) {
     writeStderrLine(
       `Warning: Node.js ${process.versions.node} can cause high temporary memory usage during shell safety checks. ` +
-        'Upgrade to Node.js 26.12.1. Qwen Code will continue normally. ' +
+        'Upgrade to Node.js 26.12.1. MiraOS will continue normally. ' +
         'See https://github.com/QwenLM/qwen-code/issues/15165',
     );
   }

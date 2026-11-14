@@ -351,7 +351,7 @@ export async function checkForUpdatesDetailed(
           status: 'update',
           info: {
             message: t(
-              'A new version of Qwen Code is available! {{current}} → {{latest}}',
+              'A new version of MiraOS is available! {{current}} → {{latest}}',
               { current: version, latest: bestUpdate.latest },
             ),
             update: { ...bestUpdate, current: version },

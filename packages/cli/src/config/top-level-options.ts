@@ -70,7 +70,7 @@ export const AUTH_TYPE_PARITY_WITNESS: Record<`${CoreAuthType}`, true> = {
 
 /** Usage banner shared by both help builders, kept here with the options. */
 export const TOP_LEVEL_USAGE =
-  'Usage: qwen [options] [command]\n\nQwen Code - Launch an interactive CLI, use -p/--prompt for non-interactive mode';
+  'Usage: miraos [options] [command]\n\nMiraOS - Launch an interactive CLI, use -p/--prompt for non-interactive mode';
 
 /**
  * The default command's yargs signature, description, and positional.
@@ -82,7 +82,7 @@ export const TOP_LEVEL_USAGE =
  */
 export const DEFAULT_COMMAND = '$0 [query..]';
 
-export const DEFAULT_COMMAND_DESC = 'Launch Qwen Code CLI';
+export const DEFAULT_COMMAND_DESC = 'Launch MiraOS CLI';
 
 export const QUERY_POSITIONAL = {
   description:
@@ -140,7 +140,7 @@ export const TOP_LEVEL_GLOBAL_OPTIONS = {
   },
   proxy: {
     type: 'string' as const,
-    description: 'Proxy for Qwen Code, like schema://user:password@host:port',
+    description: 'Proxy for MiraOS, like schema://user:password@host:port',
   },
   insecure: {
     type: 'boolean' as const,

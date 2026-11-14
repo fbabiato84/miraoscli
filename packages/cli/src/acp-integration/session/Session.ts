@@ -4795,35 +4795,7 @@ export class Session implements SessionContext {
     }
   }
 
-  async reloadModelProvidersFromDisk(options?: {
-    subscriptionSignedOut?: boolean;
-  }): Promise<void> {
-    if (
-      options?.subscriptionSignedOut &&
-      this.config.getAuthType() === AuthType.QWEN_SUBSCRIPTION
-    ) {
-      this.config
-        .getBackgroundTaskRegistry()
-        .abortAll({ notify: false, persistedStatus: 'cancelled' });
-      this.config.setSubscriptionPlan(undefined);
-      const authType = this.config.getAuthType();
-      const currentModelId = authType
-        ? getCurrentAcpModelId(
-            buildAcpModelOptions(this.config.getAllConfiguredModels()),
-            this.config.getModel(),
-            authType,
-            this.config.getCurrentModelRegistryBaseUrl(),
-          )
-        : '';
-      await this.client.extNotification('qwen/notify/session/model-update', {
-        v: 1,
-        sessionId: this.sessionId,
-        currentModelId,
-        subscriptionSignedOut: true,
-      });
-      await this.sendAvailableCommandsUpdate();
-      return;
-    }
+  async reloadModelProvidersFromDisk(): Promise<void> {
     if (
       !this.settings.reloadScopesFromDiskAtomically([
         SettingScope.User,
@@ -15280,28 +15252,9 @@ export class Session implements SessionContext {
       );
     }
 
-    if (
-      (this.requiresManagedConversationBinding ||
-        options.persistDefault === false) &&
-      selectedAuthType === AuthType.QWEN_SUBSCRIPTION &&
-      !resolvedRoute
-    ) {
-      await this.config.refreshSubscriptionModels();
-    }
-
-    const requireCachedCredentials =
-      selectedAuthType !== previousAuthType &&
-      selectedAuthType === AuthType.QWEN_OAUTH;
     const switchOptions =
-      resolvedRoute?.baseUrl !== undefined || requireCachedCredentials
-        ? {
-            ...(resolvedRoute?.baseUrl !== undefined
-              ? { baseUrl: resolvedRoute.baseUrl }
-              : {}),
-            ...(requireCachedCredentials
-              ? { requireCachedCredentials: true }
-              : {}),
-          }
+      resolvedRoute?.baseUrl !== undefined
+        ? { baseUrl: resolvedRoute.baseUrl }
         : undefined;
     try {
       await this.config.switchModel(
@@ -19193,7 +19146,7 @@ export class Session implements SessionContext {
           let settledPersistedOutputFiles: string[] | undefined;
           const sleepInhibitorHandle = acquireSleepInhibitor(
             this.config,
-            `Qwen Code is executing tool ${toolName}`,
+            `MiraOS is executing tool ${toolName}`,
           );
           try {
             try {

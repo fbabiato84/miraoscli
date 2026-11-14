@@ -86,10 +86,7 @@ export function projectAbout(systemInfo: Record<string, unknown>): string {
   };
   const cliVersion = String(systemInfo['cliVersion'] ?? '');
   const gitCommit = systemInfo['gitCommit'];
-  addField(
-    'Qwen Code',
-    cliVersion + (gitCommit ? ` (${String(gitCommit)})` : ''),
-  );
+  addField('MiraOS', cliVersion + (gitCommit ? ` (${String(gitCommit)})` : ''));
   const nodeVersion = String(systemInfo['nodeVersion'] ?? '');
   const npmVersion = String(systemInfo['npmVersion'] ?? '');
   addField(

@@ -113,50 +113,36 @@ describe('OpenTuiBanner', () => {
       <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
     );
     const text = container.textContent ?? '';
-    expect(text).toContain('>_ Qwen Code');
+    expect(text).toContain('>_ MiraOS');
     expect(text).toContain('qwen3-coder-plus');
     expect(text).toContain('qwen-code');
   });
 
-  it('refreshes live subscription identity and model, and hides the plan after logout', () => {
+  it('refreshes the live identity and model, and falls back to API Key', () => {
     let authType: AuthType | undefined = AuthType.USE_OPENAI;
     let model = 'previous-model';
-    let plan: 'plus' | 'pro' | undefined;
     const config = fakeConfig({
       getContentGeneratorConfig: () => ({ authType, model }),
       getModelDisplayName: () => model,
-      getSubscriptionPlan: () => plan,
     });
     const settings = fakeSettings();
     const ui = render(<OpenTuiBanner config={config} settings={settings} />);
     expect(ui.container.textContent).toContain('API Key | previous-model');
     authType = AuthType.QWEN_SUBSCRIPTION;
     model = 'qwen3.8-max';
-    plan = 'pro';
     ui.rerender(<OpenTuiBanner config={config} settings={settings} />);
-    expect(ui.container.textContent).toContain(
-      'Qwen Pro | [Qwen Subscription] qwen3.8-max',
-    );
+    expect(ui.container.textContent).toContain('API Key | qwen3.8-max');
     expect(ui.container.textContent).not.toContain('previous-model');
-    plan = 'plus';
-    ui.rerender(<OpenTuiBanner config={config} settings={settings} />);
-    expect(ui.container.textContent).toContain(
-      'Qwen Plus | [Qwen Subscription] qwen3.8-max',
-    );
-    expect(ui.container.textContent).not.toContain('Qwen Pro');
     model = 'next-model';
     ui.rerender(<OpenTuiBanner config={config} settings={settings} />);
-    expect(ui.container.textContent).toContain(
-      '[Qwen Subscription] next-model',
-    );
+    expect(ui.container.textContent).toContain('API Key | next-model');
     authType = undefined;
     ui.rerender(<OpenTuiBanner config={config} settings={settings} />);
-    expect(ui.container.textContent).not.toContain('Qwen Plus');
     expect(ui.container.textContent).not.toContain('[Qwen Subscription]');
     ui.unmount();
   });
 
-  it('shows the subscription provider without inventing an unknown plan', () => {
+  it('never renders the subscription plan labels', () => {
     const ui = render(
       <OpenTuiBanner
         config={fakeConfig({
@@ -169,16 +155,15 @@ describe('OpenTuiBanner', () => {
         settings={fakeSettings()}
       />,
     );
-    expect(ui.container.textContent).toContain(
-      '[Qwen Subscription] qwen3.8-max',
-    );
+    expect(ui.container.textContent).toContain('API Key | qwen3.8-max');
     expect(ui.container.textContent).not.toContain('Qwen Pro');
     expect(ui.container.textContent).not.toContain('Qwen Plus');
+    expect(ui.container.textContent).not.toContain('[Qwen Subscription]');
     ui.unmount();
   });
 
   it.each([undefined, 'Custom subtitle'])(
-    'omits the subscription usage tip and only the default spacer (%s)',
+    'omits the default spacer for the subscription provider (%s)',
     (customBannerSubtitle) => {
       const config = fakeConfig({
         getContentGeneratorConfig: () => ({
@@ -186,7 +171,6 @@ describe('OpenTuiBanner', () => {
           model: 'qwen3.8-max',
         }),
         getModelDisplayName: () => 'qwen3.8-max',
-        getSubscriptionPlan: () => 'pro',
       });
       const ui = render(
         <OpenTuiBanner
@@ -200,9 +184,9 @@ describe('OpenTuiBanner', () => {
       const rows = [
         ...ui.container.querySelector('[data-bordercolor]')!.children,
       ].map((element) => element.textContent);
-      expect(rows[0]).toContain('>_ Qwen Code');
+      expect(rows[0]).toContain('>_ MiraOS');
       expect(rows[customBannerSubtitle ? 2 : 1]).toContain(
-        'Qwen Pro | [Qwen Subscription]',
+        'API Key | qwen3.8-max',
       );
       if (customBannerSubtitle) expect(rows[1]).toBe(customBannerSubtitle);
       ui.unmount();

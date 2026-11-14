@@ -118,12 +118,7 @@ function GradientLogo({ logo }: { logo: string }) {
  * narrow. Same data sources as the original, including the AppHeader
  * custom-banner resolution.
  */
-function buildBanner(
-  config: Config,
-  settings: LoadedSettings,
-  width: number,
-  subscriptionPlan?: 'plus' | 'pro',
-) {
+function buildBanner(config: Config, settings: LoadedSettings, width: number) {
   const versionLabel = formatVersionLabel(config.getCliVersion() ?? 'unknown');
   const cg = config.getContentGeneratorConfig();
   const model = config.getModelDisplayName();
@@ -131,21 +126,13 @@ function buildBanner(
   // auth label (mirrors AppHeader.getAuthDisplayType)
   let authLabel = '';
   try {
-    if (cg?.authType && cg.authType !== 'qwen-subscription') {
-      const matched = findProviderByCredentials(cg.baseUrl, cg.apiKeyEnvKey);
-      authLabel =
-        (matched && resolveMetadataKey(matched) && matched.label) ||
-        (cg.authType === 'qwen-oauth' ? 'Qwen OAuth' : 'API Key');
-    }
+    const matched = findProviderByCredentials(cg?.baseUrl, cg?.apiKeyEnvKey);
+    authLabel =
+      (matched && resolveMetadataKey(matched) && matched.label) || 'API Key';
   } catch {
     authLabel = '';
   }
-  const authModelText =
-    cg?.authType === 'qwen-subscription'
-      ? `${subscriptionPlan ? `Qwen ${subscriptionPlan.charAt(0).toUpperCase() + subscriptionPlan.slice(1)} | ` : ''}[Qwen Subscription] ${model}`
-      : authLabel
-        ? `${authLabel} | ${model}`
-        : model;
+  const authModelText = authLabel ? `${authLabel} | ${model}` : model;
   const hint = ' (/model to change)';
 
   const custom = resolveCustomBanner(settings);
@@ -205,7 +192,7 @@ function buildBanner(
     >
       <box flexDirection="row">
         <text fg={C.accent} attributes={1}>
-          {custom.title ?? '>_ Qwen Code'}
+          {custom.title ?? '>_ MiraOS'}
         </text>
         <text fg={C.dim}>{` (${versionLabel})`}</text>
       </box>
@@ -255,8 +242,8 @@ export interface OpenTuiBannerProps {
 }
 
 /**
- * Renders the banner and subscription usage tip with their visibility settings.
- * Memoized on its inputs so streaming does not rebuild the banner.
+ * Renders the banner with its visibility settings. Memoized on its inputs so
+ * streaming does not rebuild the banner.
  */
 export function OpenTuiBanner({ config, settings }: OpenTuiBannerProps) {
   const { width } = useTerminalDimensions();
@@ -264,15 +251,8 @@ export function OpenTuiBanner({ config, settings }: OpenTuiBannerProps) {
     !config.getScreenReader() && !settings.merged.ui?.hideBanner;
   const generatorConfig = config.getContentGeneratorConfig();
   const model = config.getModelDisplayName();
-  const subscriptionPlan =
-    generatorConfig?.authType === 'qwen-subscription'
-      ? config.getSubscriptionPlan()
-      : undefined;
   const banner = useMemo(
-    () =>
-      showBanner
-        ? buildBanner(config, settings, width, subscriptionPlan)
-        : null,
+    () => (showBanner ? buildBanner(config, settings, width) : null),
     // The palette is mutated in place and `settings` keeps its identity when
     // `/theme` writes it, so the revision is the only dep that sees a repaint.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -286,7 +266,6 @@ export function OpenTuiBanner({ config, settings }: OpenTuiBannerProps) {
       generatorConfig?.baseUrl,
       generatorConfig?.apiKeyEnvKey,
       model,
-      subscriptionPlan,
     ],
   );
   return banner;

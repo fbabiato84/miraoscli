@@ -214,10 +214,10 @@ export const Header: React.FC<HeaderProps> = ({
         width={showLogo ? availableInfoPanelWidth : undefined}
       >
         {/* Title line: customBannerTitle (already sanitized) or the default
-            ">_ Qwen Code" brand. Version suffix is always appended. */}
+            ">_ MiraOS" brand. Version suffix is always appended. */}
         <Text>
           <Text bold color={theme.text.accent}>
-            {customBannerTitle ? customBannerTitle : '>_ Qwen Code'}
+            {customBannerTitle ? customBannerTitle : '>_ MiraOS'}
           </Text>
           <Text color={theme.text.secondary}> ({versionLabel})</Text>
         </Text>
